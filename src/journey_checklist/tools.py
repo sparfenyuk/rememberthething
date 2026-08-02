@@ -66,16 +66,25 @@ def register_tools(mcp: FastMCP, service: ChecklistService) -> None:
         return _result(lambda: service.get_blueprint(blueprint_id))
 
     @_tool(mcp)
-    def create_blueprint(name: str, items: list[dict[str, Any]] | None = None) -> ToolResult:
+    def create_blueprint(
+        name: str,
+        items: list[dict[str, Any]] | None = None,
+        module_selections: list[dict[str, Any] | str] | None = None,
+    ) -> ToolResult:
         """Create a named reusable blueprint from zero or more items."""
-        return _result(lambda: service.create_blueprint(name, items))
+        return _result(lambda: service.create_blueprint(name, items, module_selections))
 
     @_tool(mcp, app=app)
     def start_journey(
-        name: str, context: dict[str, Any] | None = None, blueprint_id: str | None = None
+        name: str,
+        context: dict[str, Any] | None = None,
+        blueprint_id: str | None = None,
+        module_selections: list[dict[str, Any] | str] | None = None,
     ) -> ToolResult:
-        """Start an independent journey, optionally snapshotting a blueprint."""
-        return _result(lambda: service.start_journey(name, context, blueprint_id))
+        """Start an independent journey, optionally snapshotting a blueprint or modules."""
+        return _result(
+            lambda: service.start_journey(name, context, blueprint_id, module_selections)
+        )
 
     @_tool(mcp, app=app)
     def get_journey(journey_id: str) -> ToolResult:
@@ -137,46 +146,82 @@ def register_tools(mcp: FastMCP, service: ChecklistService) -> None:
         )
 
     @_tool(mcp)
-    def list_packs(journey_id: str | None = None) -> ToolResult:
-        """List reusable packs and optional journey context for deliberate selection."""
-        return _result(lambda: service.list_packs(journey_id))
+    def list_modules() -> ToolResult:
+        """List reusable composable modules with variant, include, and choice metadata."""
+        return _result(service.list_modules)
 
     @_tool(mcp)
-    def get_pack(pack_id: str) -> ToolResult:
-        """Read one pack with common items and separately labeled variants."""
-        return _result(lambda: service.get_pack(pack_id))
+    def get_module(module_id: str) -> ToolResult:
+        """Read one module, including stable items, variant deltas, includes, and choices."""
+        return _result(lambda: service.get_module(module_id))
 
     @_tool(mcp)
-    def create_pack(
+    def create_module(
         name: str,
-        common_items: list[dict[str, Any]],
+        common_items: list[dict[str, Any]] | None = None,
         variants: list[dict[str, Any]] | None = None,
+        includes: list[dict[str, Any] | str] | None = None,
+        choices: list[dict[str, Any]] | None = None,
         description: str | None = None,
     ) -> ToolResult:
-        """Create a reusable pack with common items and explicit variants."""
-        return _result(lambda: service.create_pack(name, common_items, variants, description))
+        """Create a reusable module from stable items and explicit composition metadata."""
+        return _result(
+            lambda: service.create_module(
+                name, common_items, variants, includes, choices, description
+            )
+        )
 
     @_tool(mcp)
-    def update_pack(
-        pack_id: str,
+    def update_module(
+        module_id: str,
         name: str | None = None,
         description: str | None = None,
         common_items: list[dict[str, Any]] | None = None,
         variants: list[dict[str, Any]] | None = None,
+        includes: list[dict[str, Any] | str] | None = None,
+        choices: list[dict[str, Any]] | None = None,
     ) -> ToolResult:
-        """Update pack metadata or replace its reusable item definitions."""
+        """Update module definitions without rewriting existing materialized targets."""
         return _result(
-            lambda: service.update_pack(pack_id, name, description, common_items, variants)
+            lambda: service.update_module(
+                module_id, name, description, common_items, variants, includes, choices
+            )
         )
 
     @_tool(mcp)
-    def delete_pack(pack_id: str) -> ToolResult:
-        """Delete a reusable pack without rewriting copied checklist items."""
-        return _result(lambda: service.delete_pack(pack_id))
+    def delete_module(module_id: str) -> ToolResult:
+        """Delete an unused module definition."""
+        return _result(lambda: service.delete_module(module_id))
 
     @_tool(mcp)
-    def include_pack(
-        target_type: str, target_id: str, pack_id: str, variant: str | None = None
+    def include_module(
+        target_type: str,
+        target_id: str,
+        module_id: str,
+        variant: str | None = None,
+        choices: dict[str, str] | list[dict[str, Any]] | None = None,
     ) -> ToolResult:
-        """Copy common pack items and one explicitly selected variant into a target."""
-        return _result(lambda: service.include_pack(target_type, target_id, pack_id, variant))
+        """Select and materialize one module into a journey or blueprint."""
+        return _result(
+            lambda: service.include_module(target_type, target_id, module_id, variant, choices)
+        )
+
+    @_tool(mcp)
+    def select_module_option(
+        target_type: str,
+        target_id: str,
+        choice_id: str,
+        option_key: str,
+        selection_id: str | None = None,
+    ) -> ToolResult:
+        """Explicitly resolve one module one-of choice and materialize its option."""
+        return _result(
+            lambda: service.select_module_option(
+                target_type, target_id, choice_id, option_key, selection_id
+            )
+        )
+
+    @_tool(mcp)
+    def refresh_composition(target_type: str, target_id: str) -> ToolResult:
+        """Explicitly refresh selected modules while preserving edits and removals."""
+        return _result(lambda: service.refresh_composition(target_type, target_id))

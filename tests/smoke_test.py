@@ -70,10 +70,12 @@ def main() -> None:
         added = service.add_items("journey", journey_id, [{"name": "umbrella", "group": "weather"}])
         assert added["next_steps"][0]["tool"] == "promote_items"
         assert repository.get_journey(journey_id)["item_count"] == 2
-        pack = repository.create_pack(
-            "winter gear", [{"name": "gloves"}], [{"label": "winter", "items": [{"name": "coat"}]}]
+        module = repository.create_module(
+            "winter gear",
+            [{"name": "gloves"}],
+            [{"label": "winter", "add": [{"name": "coat"}], "remove": []}],
         )
-        included = service.include_pack("journey", journey_id, pack["id"], "winter")
+        included = service.include_module("journey", journey_id, module["id"], "winter")
         assert included["affected"]["target"]["item_count"] == 4
         ad_hoc = service.add_items("journey", journey_id, [{"name": "adapter"}])
         ad_hoc_id = ad_hoc["affected"]["item_ids"][0]
@@ -98,12 +100,14 @@ def main() -> None:
         "update_items",
         "remove_items",
         "promote_items",
-        "list_packs",
-        "get_pack",
-        "create_pack",
-        "update_pack",
-        "delete_pack",
-        "include_pack",
+        "list_modules",
+        "get_module",
+        "create_module",
+        "update_module",
+        "delete_module",
+        "include_module",
+        "select_module_option",
+        "refresh_composition",
     }
     assert expected == set(fake.tools)
     assert UI_URI in fake.resources

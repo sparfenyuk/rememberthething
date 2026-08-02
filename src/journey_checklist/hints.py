@@ -20,12 +20,12 @@ def _hint(
     }
 
 
-def journey_hints(journey: dict[str, Any], packs: dict[str, Any]) -> list[dict[str, Any]]:
-    if any(item["source"]["kind"] == "pack" for item in journey["items"]):
+def journey_hints(journey: dict[str, Any], modules: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if any(item["source"]["kind"] == "module" for item in journey["items"]):
         return []
-    if not packs["packs"]:
+    if not modules:
         return []
-    has_variants = any(pack["variants"] for pack in packs["packs"])
+    has_variants = any(module["variants"] for module in modules)
     if has_variants and not journey["context"].get("season"):
         return [
             _hint(
@@ -37,8 +37,8 @@ def journey_hints(journey: dict[str, Any], packs: dict[str, Any]) -> list[dict[s
         ]
     return [
         _hint(
-            "list_packs",
-            "Review reusable packs before adding more checklist items.",
+            "list_modules",
+            "Review reusable modules before adding more checklist items.",
             {"journey_id": journey["id"]},
         )
     ]
@@ -82,19 +82,19 @@ def direct_item_hints(
         ]
         hints.append(
             _hint(
-                "create_pack",
-                "Grouped direct items can be saved as a reusable pack.",
-                {"name": f"{groups[0]} pack", "common_items": pack_items, "variants": []},
+                "create_module",
+                "Grouped direct items can be saved as a reusable module.",
+                {"name": f"{groups[0]} module", "common_items": pack_items, "variants": []},
                 confirmation=True,
             )
         )
     return hints[:2]
 
 
-def include_pack_hints(
+def include_module_hints(
     target_type: str,
     target_id: str,
-    pack_id: str,
+    module_id: str,
     available_variants: list[str],
     variant: str | None,
 ) -> list[dict[str, Any]]:
@@ -102,10 +102,44 @@ def include_pack_hints(
         return []
     return [
         _hint(
-            "include_pack",
-            "Choose a pack variant explicitly; the server will not infer one.",
-            {"target_type": target_type, "target_id": target_id, "pack_id": pack_id},
+            "include_module",
+            "Choose a module variant explicitly; the server will not infer one.",
+            {"target_type": target_type, "target_id": target_id, "module_id": module_id},
             needs=["variant"],
             confirmation=True,
         )
     ]
+
+
+def composition_hints(
+    target_type: str,
+    target_id: str,
+    unresolved_choices: list[dict[str, Any]],
+    *,
+    conflicts: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    hints = [
+        _hint(
+            "select_module_option",
+            f"Resolve the {choice['label']} choice explicitly.",
+            {
+                "target_type": target_type,
+                "target_id": target_id,
+                "selection_id": choice["selection_id"],
+                "choice_id": choice["choice_id"],
+            },
+            needs=["option_key"],
+            confirmation=True,
+        )
+        for choice in unresolved_choices
+    ]
+    if conflicts:
+        hints.append(
+            _hint(
+                "refresh_composition",
+                "Refresh the selected modules after reviewing preserved conflicts.",
+                {"target_type": target_type, "target_id": target_id},
+                confirmation=True,
+            )
+        )
+    return hints[:3]

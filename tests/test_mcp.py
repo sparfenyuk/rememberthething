@@ -22,12 +22,14 @@ TOOL_NAMES = {
     "update_items",
     "remove_items",
     "promote_items",
-    "list_packs",
-    "get_pack",
-    "create_pack",
-    "update_pack",
-    "delete_pack",
-    "include_pack",
+    "list_modules",
+    "get_module",
+    "create_module",
+    "update_module",
+    "delete_module",
+    "include_module",
+    "select_module_option",
+    "refresh_composition",
 }
 
 
@@ -49,7 +51,7 @@ async def test_mcp_initialize_tools_and_tool_only_flow(tmp_path, monkeypatch):
                     assert initialized.serverInfo.name == "Journey Checklist"
                     tools = await session.list_tools()
                     names = {tool.name for tool in tools.tools}
-                    assert {"start_journey", "add_items", "include_pack", "get_journey"} <= names
+                    assert {"start_journey", "add_items", "include_module", "get_journey"} <= names
                     created = await session.call_tool("start_journey", {"name": "Berlin"})
                     payload = json.loads(created.content[0].text)
                     assert payload["affected"]["journey"]["name"] == "Berlin"
@@ -131,20 +133,22 @@ async def test_success_and_error_envelopes_validate_across_tool_families(tmp_pat
                             "items": [{"name": "passport", "group": "documents"}],
                         },
                     )
-                    pack = await call_and_validate(
-                        "create_pack",
+                    module = await call_and_validate(
+                        "create_module",
                         {
                             "name": "essentials",
                             "common_items": [{"name": "passport", "group": "documents"}],
-                            "variants": [{"label": "summer", "items": [{"name": "hat"}]}],
+                            "variants": [
+                                {"label": "summer", "add": [{"name": "hat"}], "remove": []}
+                            ],
                         },
                     )
                     included = await call_and_validate(
-                        "include_pack",
+                        "include_module",
                         {
                             "target_type": "journey",
                             "target_id": journey_id,
-                            "pack_id": pack["affected"]["pack"]["id"],
+                            "module_id": module["affected"]["module"]["id"],
                         },
                     )
                     assert included["conflicts"]
@@ -156,15 +160,85 @@ async def test_success_and_error_envelopes_validate_across_tool_families(tmp_pat
                         "get_journey", {"journey_id": "missing-journey"}, is_error=True
                     )
                     await call_and_validate(
-                        "include_pack",
+                        "include_module",
                         {
                             "target_type": "journey",
                             "target_id": journey_id,
-                            "pack_id": pack["affected"]["pack"]["id"],
+                            "module_id": module["affected"]["module"]["id"],
                             "variant": "winter",
                         },
                         is_error=True,
                     )
+
+
+@pytest.mark.asyncio
+async def test_mcp_choice_follow_up_is_structured_and_tool_only(tmp_path, monkeypatch):
+    monkeypatch.setenv("JOURNEY_CHECKLIST_DB", str(tmp_path / "choice-flow.sqlite3"))
+    monkeypatch.delenv("LMSTASH_ORIGIN_TOKEN", raising=False)
+    from src.server import create_app
+
+    app = create_app(tmp_path / "choice-flow.sqlite3")
+    transport = httpx.ASGITransport(app=app)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            async with streamable_http_client(
+                "http://testserver/mcp", http_client=client
+            ) as streams:
+                async with ClientSession(streams[0], streams[1]) as session:
+                    await session.initialize()
+                    module_result = await session.call_tool(
+                        "create_module",
+                        {
+                            "name": "Video",
+                            "choices": [
+                                {
+                                    "choice_key": "lens",
+                                    "label": "Lens",
+                                    "options": [
+                                        {"option_key": "prime", "name": "35mm"},
+                                        {"option_key": "zoom", "name": "24-70"},
+                                    ],
+                                }
+                            ],
+                        },
+                    )
+                    module = json.loads(module_result.content[0].text)["affected"]["module"]
+                    journey = json.loads(
+                        (await session.call_tool("start_journey", {"name": "Trip"})).content[0].text
+                    )["affected"]["journey"]
+                    included = json.loads(
+                        (
+                            await session.call_tool(
+                                "include_module",
+                                {
+                                    "target_type": "journey",
+                                    "target_id": journey["id"],
+                                    "module_id": module["id"],
+                                },
+                            )
+                        )
+                        .content[0]
+                        .text
+                    )
+                    assert included["affected"]["unresolved_choices"]
+                    assert included["next_steps"][0]["tool"] == "select_module_option"
+                    selected = json.loads(
+                        (
+                            await session.call_tool(
+                                "select_module_option",
+                                {
+                                    "target_type": "journey",
+                                    "target_id": journey["id"],
+                                    "selection_id": included["affected"]["selection_id"],
+                                    "choice_id": "lens",
+                                    "option_key": "prime",
+                                },
+                            )
+                        )
+                        .content[0]
+                        .text
+                    )
+                    assert selected["affected"]["target"]["items"][0]["name"] == "35mm"
 
 
 @pytest.mark.asyncio
@@ -206,3 +280,8 @@ def test_ui_contract_uses_mcp_app_lifecycle_and_tool_notifications():
     assert "ui/notifications/tool-result" in ui.CHECKLIST_HTML
     assert "message?.params" in ui.CHECKLIST_HTML
     assert "value.method === 'tools/call'" not in ui.CHECKLIST_HTML
+    assert "include_module" in ui.CHECKLIST_HTML
+    assert "select_module_option" in ui.CHECKLIST_HTML
+    assert "refresh_composition" in ui.CHECKLIST_HTML
+    assert "source.path" in ui.CHECKLIST_HTML
+    assert "Modules in this checklist" in ui.CHECKLIST_HTML

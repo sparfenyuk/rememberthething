@@ -1,6 +1,6 @@
 # Journey Checklist MCP
 
-Persistent journey checklists, reusable blueprints, and explicit seasonal packs exposed as a small FastMCP server.
+Persistent journey checklists, reusable blueprints, and composable modules exposed as a small FastMCP server.
 
 ## Local run
 
@@ -26,7 +26,7 @@ For a hosted runtime, set `LMSTASH_ALLOWED_HOSTS` and `LMSTASH_ALLOWED_ORIGINS` 
 
 ## Tool and UI contract
 
-The tools are target-explicit: journeys and blueprints own copied item rows; packs own reusable definitions. Starting a journey or including a pack snapshots items. Direct journey items are never promoted implicitly. `next_steps` contains bounded hints with tool names, safe arguments, missing inputs, and confirmation requirements; hints never trigger a mutation.
+The tools are target-explicit: journeys and blueprints own concrete materialized item rows plus selected module references and direct extras. Modules own stable item keys, nested includes, variant add/remove deltas, and explicit `one_of` choices. `include_module` and `refresh_composition` materialize snapshots; edits and durable removals survive refresh. Direct journey items are never promoted implicitly. `next_steps` contains bounded hints with tool names, safe arguments, missing inputs, and confirmation requirements; hints never trigger a mutation.
 
 `start_journey` and `get_journey` advertise `ui://journey-checklist/checklist.html`. Compatible MCP Apps clients render the same persisted journey as a narrow-width-safe todo surface. Tool-only clients receive the same structured envelope:
 
@@ -38,11 +38,13 @@ The tools are target-explicit: journeys and blueprints own copied item rows; pac
 }
 ```
 
-Every tool advertises a generated output schema for this envelope. `affected` contains the operation-specific payload; successful `include_pack` results may also include `conflicts`, while rejected operations include `error` without changing the text content or `isError` signal.
+Every tool advertises a generated output schema for this envelope. `affected` contains the operation-specific payload, including selected modules, source paths, unresolved choices, and conflicts; rejected operations include `error` without changing the text content or `isError` signal.
+
+Existing SQLite pack tables remain as read-only migration input. Startup converts each pack to a module with deterministic stable keys and variant deltas, preserving existing checklist rows and provenance where possible. Migration is idempotent. New clients should use the module tools; conditions, computed quantities, tags/search, and persistent inventory are intentionally deferred.
 
 ## LM-driven photo workflow
 
-The connected LM owns the conversation: gather destination, dates, duration, purpose, and season; understand any user-provided packing photo; choose a pack or explicit variant; then call the tools. The server stores checklist context, item data, reusable blueprints and packs, and item provenance. It does not accept photo bytes, call vision services, infer recommendations, or silently choose seasonal variants.
+The connected LM owns the conversation: gather destination, dates, duration, purpose, and season; understand any user-provided packing photo; choose modules, variants, and explicit choice options; then call the tools. The server stores checklist context, item data, reusable blueprints and modules, and item provenance. It does not accept photo bytes, call vision services, infer recommendations, or silently choose variants or one-of options.
 
 ## Verification
 

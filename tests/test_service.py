@@ -12,7 +12,7 @@ def test_service_envelope_hints_are_bounded_and_non_chaining(tmp_path):
     journey = service.start_journey("Trip")["affected"]["journey"]
     added = service.add_items("journey", journey["id"], [{"name": "umbrella", "group": "weather"}])
     assert added["summary"] == "Items added."
-    assert [hint["tool"] for hint in added["next_steps"]] == ["promote_items", "create_pack"]
+    assert [hint["tool"] for hint in added["next_steps"]] == ["promote_items", "create_module"]
     assert all("requires_confirmation" in hint for hint in added["next_steps"])
     assert service.get_journey(journey["id"])["affected"]["journey"]["item_count"] == 1
 
@@ -39,4 +39,4 @@ def test_season_hint_targets_update_journey(tmp_path):
     assert hint["arguments"] == {"journey_id": journey["id"]}
     assert hint["needs"] == ["season"]
     updated = service.update_journey(journey["id"], {"season": "winter"})
-    assert updated["next_steps"][0]["tool"] == "list_packs"
+    assert updated["next_steps"][0]["tool"] == "list_modules"
