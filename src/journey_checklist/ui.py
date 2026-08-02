@@ -56,11 +56,11 @@ CHECKLIST_HTML = r"""<!doctype html>
   window.addEventListener('message', (event) => {
     const data = event.data || {};
     if (data.id && pending.has(data.id)) { const call = pending.get(data.id); pending.delete(data.id); data.error ? call.reject(new Error(data.error.message || 'Tool call failed')) : call.resolve(data.result); return; }
-    if (data.method === 'ui/notifications/tool-result') { const incoming = envelope(data); const call = [...pending.entries()].find(([, value]) => value.method === 'tools/call'); if (call) { pending.delete(call[0]); call[1].resolve(incoming); } else if (incoming) apply(incoming); return; }
-    if (data.method === 'ui/notifications/tool-cancelled') { const call = [...pending.entries()].find(([, value]) => value.method === 'tools/call'); if (call) { pending.delete(call[0]); call[1].reject(new Error(data.params?.reason || 'Tool call cancelled')); } else showError(data.params?.reason || 'Tool call cancelled.'); return; }
+    if (data.method === 'ui/notifications/tool-result') { const incoming = envelope(data); if (incoming) apply(incoming); return; }
+    if (data.method === 'ui/notifications/tool-cancelled') { showError(data.params?.reason || 'Tool call cancelled.'); return; }
     if (data.method === 'ui/notifications/tool-input') return;
   });
-  function sendRequest(method, params) { return new Promise((resolve, reject) => { const id = `journey-${nextId++}`; pending.set(id, {resolve, reject, method}); window.parent.postMessage({jsonrpc:'2.0', id, method, params}, '*'); }); }
+  function sendRequest(method, params) { return new Promise((resolve, reject) => { const id = `journey-${nextId++}`; pending.set(id, {resolve, reject}); window.parent.postMessage({jsonrpc:'2.0', id, method, params}, '*'); }); }
   function sendNotification(method, params = {}) { window.parent.postMessage({jsonrpc:'2.0', method, params}, '*'); }
   function callTool(name, args) { return sendRequest('tools/call', {name, arguments:args}).then(envelope); }
   function apply(result) {

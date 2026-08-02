@@ -51,3 +51,4 @@ def test_ui_contract_uses_mcp_app_lifecycle_and_tool_notifications():
     assert "ui/notifications/initialized" in ui.CHECKLIST_HTML
     assert "ui/notifications/tool-result" in ui.CHECKLIST_HTML
     assert "message?.params" in ui.CHECKLIST_HTML
+    assert "value.method === 'tools/call'" not in ui.CHECKLIST_HTML
