@@ -12,6 +12,90 @@ from mcp.types import TextContent
 from .service import ChecklistService, run_tool
 from .ui import CHECKLIST_HTML, UI_URI
 
+BLUEPRINT_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string"},
+        "affected": {
+            "type": "object",
+            "properties": {
+                "blueprint": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "name": {"type": "string"},
+                        "items": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "name": {"type": "string"},
+                                    "group": {"type": ["string", "null"]},
+                                    "quantity": {"type": "integer"},
+                                    "unit": {"type": ["string", "null"]},
+                                    "note": {"type": ["string", "null"]},
+                                    "packed": {"type": "boolean"},
+                                    "not_needed": {"type": "boolean"},
+                                    "source": {
+                                        "type": "object",
+                                        "properties": {
+                                            "kind": {"type": "string"},
+                                            "id": {"type": ["string", "null"]},
+                                            "label": {"type": ["string", "null"]},
+                                            "variant": {"type": ["string", "null"]},
+                                        },
+                                        "required": ["kind", "id", "label", "variant"],
+                                        "additionalProperties": False,
+                                    },
+                                    "edited": {"type": "boolean"},
+                                },
+                                "required": [
+                                    "id",
+                                    "name",
+                                    "group",
+                                    "quantity",
+                                    "unit",
+                                    "note",
+                                    "packed",
+                                    "not_needed",
+                                    "source",
+                                    "edited",
+                                ],
+                                "additionalProperties": False,
+                            },
+                        },
+                        "item_count": {"type": "integer"},
+                    },
+                    "required": ["id", "name", "items", "item_count"],
+                    "additionalProperties": False,
+                }
+            },
+            "additionalProperties": False,
+        },
+        "next_steps": {"type": "array", "items": {"type": "object"}},
+        "error": {
+            "type": "object",
+            "properties": {
+                "code": {"type": "string"},
+                "message": {"type": "string"},
+                "details": {},
+            },
+            "required": ["code", "message"],
+            "additionalProperties": False,
+        },
+    },
+    "required": ["summary", "affected", "next_steps"],
+    "oneOf": [
+        {
+            "properties": {"affected": {"required": ["blueprint"]}},
+            "not": {"required": ["error"]},
+        },
+        {"required": ["error"], "properties": {"affected": {"maxProperties": 0}}},
+    ],
+    "additionalProperties": False,
+}
+
 
 def _result(operation: Callable[[], dict[str, Any]]) -> ToolResult:
     payload, is_error = run_tool(operation)
@@ -40,7 +124,7 @@ def register_tools(mcp: FastMCP, service: ChecklistService) -> None:
         """Read one blueprint and its complete current item state."""
         return _result(lambda: service.get_blueprint(blueprint_id))
 
-    @mcp.tool()
+    @mcp.tool(output_schema=BLUEPRINT_OUTPUT_SCHEMA)
     def create_blueprint(name: str, items: list[dict[str, Any]] | None = None) -> ToolResult:
         """Create a named reusable blueprint from zero or more items."""
         return _result(lambda: service.create_blueprint(name, items))
