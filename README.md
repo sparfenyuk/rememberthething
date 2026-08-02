@@ -16,13 +16,13 @@ The app defaults to `/data/journey_checklist.sqlite3` when `JOURNEY_CHECKLIST_DB
 
 ## LMStash contract
 
-`.mcpcloud/app.yaml` declares Python 3.12, frozen `uv`, the `src.server:app` ASGI entrypoint, streamable HTTP at `/mcp`, `/healthz`, OAuth `mcp:invoke`, bounded resources, and one durable `/data` mount. Run the platform checker when the `lmstash` CLI is available:
+`.mcpcloud/app.yaml` is the authoritative LMStash manifest for the runtime, ASGI entrypoint, MCP transport, health route, OAuth, resources, and durable storage. Run the platform checker when the `lmstash` CLI is available:
 
 ```sh
 lmstash check
 ```
 
-For a hosted runtime, set `LMSTASH_ALLOWED_HOSTS` to a JSON string array and configure `LMSTASH_ORIGIN_TOKEN`; MCP requests then require `X-LMStash-Origin-Token`. Health remains unauthenticated.
+For a hosted runtime, set `LMSTASH_ALLOWED_HOSTS` and `LMSTASH_ALLOWED_ORIGINS` to JSON string arrays and configure `LMSTASH_ORIGIN_TOKEN`; MCP requests then require `X-LMStash-Origin-Token`. Health remains unauthenticated.
 
 ## Tool and UI contract
 
@@ -40,7 +40,7 @@ The tools are target-explicit: journeys and blueprints own copied item rows; pac
 
 ## LM-driven photo workflow
 
-The connected LM owns the conversation: gather destination, dates, duration, purpose, and season; understand any user-provided packing photo; choose a pack or explicit variant; then call the tools. The server stores only checklist context and item data. It does not accept photo bytes, call vision services, infer recommendations, or silently choose seasonal variants.
+The connected LM owns the conversation: gather destination, dates, duration, purpose, and season; understand any user-provided packing photo; choose a pack or explicit variant; then call the tools. The server stores checklist context, item data, reusable blueprints and packs, and item provenance. It does not accept photo bytes, call vision services, infer recommendations, or silently choose seasonal variants.
 
 ## Verification
 
