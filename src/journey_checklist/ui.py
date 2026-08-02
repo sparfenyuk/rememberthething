@@ -44,22 +44,26 @@ CHECKLIST_HTML = r"""<!doctype html>
   <section id="hints-section" hidden><div class="section-head"><h2>Useful next steps</h2></div><div id="hints"></div></section>
 </main>
 <script>
-  const pending = new Map(); let nextId = 1; let journey = null; let lastResult = null;
+  const pending = new Map(); let nextId = 1; let journey = null;
   const $ = (id) => document.getElementById(id);
   function envelope(message) {
-    const candidate = message?.structuredContent || message?.result?.structuredContent || message?.result || message;
+    const candidate = message?.params ?? message?.structuredContent ?? message?.result?.structuredContent ?? message?.result ?? message;
+    if (candidate?.structuredContent?.summary) return candidate.structuredContent;
     if (candidate?.summary) return candidate;
     const text = candidate?.content?.find?.((part) => part.type === 'text')?.text;
     try { return JSON.parse(text); } catch (_) { return null; }
   }
   window.addEventListener('message', (event) => {
     const data = event.data || {};
-    if (data.id && pending.has(data.id)) { const call = pending.get(data.id); pending.delete(data.id); data.error ? call.reject(new Error(data.error.message || 'Tool call failed')) : call.resolve(envelope(data)); }
-    const incoming = envelope(data); if (incoming) apply(incoming);
+    if (data.id && pending.has(data.id)) { const call = pending.get(data.id); pending.delete(data.id); data.error ? call.reject(new Error(data.error.message || 'Tool call failed')) : call.resolve(data.result); return; }
+    if (data.method === 'ui/notifications/tool-result') { const incoming = envelope(data); const call = [...pending.entries()].find(([, value]) => value.method === 'tools/call'); if (call) { pending.delete(call[0]); call[1].resolve(incoming); } else if (incoming) apply(incoming); return; }
+    if (data.method === 'ui/notifications/tool-cancelled') { const call = [...pending.entries()].find(([, value]) => value.method === 'tools/call'); if (call) { pending.delete(call[0]); call[1].reject(new Error(data.params?.reason || 'Tool call cancelled')); } else showError(data.params?.reason || 'Tool call cancelled.'); return; }
+    if (data.method === 'ui/notifications/tool-input') return;
   });
-  function callTool(name, args) { return new Promise((resolve, reject) => { const id = `journey-${nextId++}`; pending.set(id, {resolve, reject}); window.parent.postMessage({jsonrpc:'2.0', id, method:'tools/call', params:{name, arguments:args}}, '*'); }); }
+  function sendRequest(method, params) { return new Promise((resolve, reject) => { const id = `journey-${nextId++}`; pending.set(id, {resolve, reject, method}); window.parent.postMessage({jsonrpc:'2.0', id, method, params}, '*'); }); }
+  function sendNotification(method, params = {}) { window.parent.postMessage({jsonrpc:'2.0', method, params}, '*'); }
+  function callTool(name, args) { return sendRequest('tools/call', {name, arguments:args}).then(envelope); }
   function apply(result) {
-    lastResult = result;
     if (result.error) { showError(result.error.message || 'The change was rejected.'); return; }
     const next = result.affected?.journey || result.affected?.target?.id && result.affected.target;
     if (next?.items) { journey = next; render(); }
@@ -78,7 +82,7 @@ CHECKLIST_HTML = r"""<!doctype html>
     const row = document.createElement('div'); row.className = `item ${item.packed ? 'done' : ''} ${item.not_needed ? 'not-needed' : ''}`;
     row.innerHTML = `<input type="checkbox" aria-label="Mark ${escapeHtml(item.name)} packed" ${item.packed ? 'checked' : ''} ${item.not_needed ? 'disabled' : ''}><div><div class="item-name">${escapeHtml(item.name)} <span class="source ${item.source.kind === 'direct' ? 'direct' : ''}">${escapeHtml(item.source.kind)}</span></div><div class="item-note">${item.quantity}${item.unit ? ` ${escapeHtml(item.unit)}` : ''}${item.note ? ` · ${escapeHtml(item.note)}` : ''}</div></div><div class="actions"><button type="button" data-edit>Edit</button><button class="danger" type="button" data-remove>Remove</button></div>`;
     row.querySelector('input').addEventListener('change', () => mutate('update_items', {target_type:'journey', target_id:journey.id, updates:[{item_id:item.id, packed:row.querySelector('input').checked}]}));
-    row.querySelector('[data-edit]').addEventListener('click', () => { const name = prompt('Item name', item.name); if (name && name.trim() !== item.name) mutate('update_items', {target_type:'journey', target_id:journey.id, updates:[{item_id:item.id, name:name.trim()}]}); });
+    row.querySelector('[data-edit]').addEventListener('click', () => { const name = prompt('Item name', item.name); if (name === null) return; const group = prompt('Group (blank to clear)', item.group || ''); if (group === null) return; const quantity = prompt('Quantity', item.quantity); if (quantity === null) return; const unit = prompt('Unit (blank to clear)', item.unit || ''); if (unit === null) return; const note = prompt('Note (blank to clear)', item.note || ''); if (note === null) return; const parsedQuantity = Number(quantity); if (!Number.isInteger(parsedQuantity) || parsedQuantity < 1) return showError('Quantity must be a positive whole number.'); const next = {name:name.trim(), group:group.trim() || null, quantity:parsedQuantity, unit:unit.trim() || null, note:note.trim() || null}; const updates = Object.fromEntries(Object.entries(next).filter(([key, value]) => value !== item[key] && !(value === null && item[key] == null))); if (Object.keys(updates).length) mutate('update_items', {target_type:'journey', target_id:journey.id, updates:[{item_id:item.id, ...updates}]}); });
     row.querySelector('[data-remove]').addEventListener('click', () => { if (confirm(`Remove ${item.name}?`)) mutate('remove_items', {target_type:'journey', target_id:journey.id, item_ids:[item.id]}); }); return row;
   }
   async function mutate(tool, args) { try { const result = await callTool(tool,args); apply(result); } catch (error) { showError(error.message); } }
@@ -87,7 +91,9 @@ CHECKLIST_HTML = r"""<!doctype html>
   $('packs').addEventListener('click', async () => { if (!journey) return; try { const result = await callTool('list_packs', {journey_id:journey.id}); apply(result); showPacks(result.affected?.packs || result.affected?.packs?.packs || result.affected?.packs); } catch (error) { showError(error.message); } });
   function showPacks(data) { const packs = data?.packs || []; if (!packs.length) return showError('No reusable packs yet.'); const section = $('hints-section'); section.hidden = false; $('hints').innerHTML = packs.map((pack) => `<div class="hint"><p><strong>${escapeHtml(pack.name)}</strong><br>${pack.common_item_count} common item(s) · ${(pack.variants || []).join(', ') || 'no variants'}</p><span class="actions"><button data-pack="${pack.id}">Include common</button>${(pack.variants || []).map((variant) => `<button data-pack="${pack.id}" data-variant="${escapeHtml(variant)}">${escapeHtml(variant)}</button>`).join('')}</span></div>`).join(''); $('hints').querySelectorAll('[data-pack]').forEach((button) => button.addEventListener('click', () => mutate('include_pack', {target_type:'journey', target_id:journey.id, pack_id:button.dataset.pack, ...(button.dataset.variant ? {variant:button.dataset.variant} : {})}))); }
   function renderHints(hints) { const section = $('hints-section'); if (!hints.length) { section.hidden = true; return; } section.hidden = false; $('hints').innerHTML = hints.map((hint, index) => `<div class="hint"><p>${escapeHtml(hint.reason)}${hint.needs.length ? `<br>Needs: ${escapeHtml(hint.needs.join(', '))}` : ''}</p><button data-hint="${index}">Open</button></div>`).join(''); $('hints').querySelectorAll('[data-hint]').forEach((button) => button.addEventListener('click', () => activateHint(hints[button.dataset.hint]))); }
-  async function activateHint(hint) { const args = {...hint.arguments}; for (const need of hint.needs || []) { const value = prompt(`Provide ${need}`); if (!value) return; if (need === 'variant') args.variant = value; else if (need.includes('or')) args.new_blueprint_name = value; else args[need] = value; } if (hint.requires_confirmation && !confirm(hint.reason)) return; mutate(hint.tool, args); }
+  async function activateHint(hint) { const args = {...hint.arguments}; for (const need of hint.needs || []) { if (need === 'blueprint_id or new_blueprint_name') { const blueprintId = prompt('Existing blueprint ID (blank to create a new one)'); if (blueprintId) args.blueprint_id = blueprintId; else { const name = prompt('New blueprint name'); if (!name) return; args.new_blueprint_name = name; } continue; } const value = prompt(`Provide ${need}`); if (!value) return; args[need] = need === 'duration_days' ? Number(value) : value; } if (hint.requires_confirmation && !confirm(hint.reason)) return; mutate(hint.tool, args); }
+  async function initialize() { try { await sendRequest('ui/initialize', {protocolVersion:'2026-01-26', clientInfo:{name:'journey-checklist', version:'0.1.0'}, appCapabilities:{availableDisplayModes:['inline']}}); sendNotification('ui/notifications/initialized'); } catch (error) { showError(error.message || 'Unable to connect to the MCP host.'); } }
+  initialize();
 </script>
 </body>
 </html>"""

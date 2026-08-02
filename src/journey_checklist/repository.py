@@ -305,7 +305,10 @@ class Repository:
         self, name: str, items: list[dict[str, Any]] | None = None
     ) -> dict[str, Any]:
         name = self._name(name)
-        items = items or []
+        if items is None:
+            items = []
+        if not isinstance(items, list) or len(items) > 50:
+            raise ChecklistError("items must contain at most 50 entries.")
         values = [self._item_values(item) for item in items]
         with self._connect() as connection, connection:
             blueprint_id = self._id("bp")
@@ -521,6 +524,8 @@ class Repository:
                 item_id = update.get("item_id", update.get("id"))
                 if not isinstance(item_id, str) or not item_id:
                     raise ChecklistError("Each item update requires item_id.")
+                if item_id in item_rows:
+                    raise ChecklistError(f"Item id may appear only once per update: {item_id}.")
                 row = connection.execute(
                     "SELECT * FROM items WHERE id = ? AND target_type = ? AND target_id = ?",
                     (item_id, target_type, target_id),
@@ -728,6 +733,8 @@ class Repository:
         description: str | None = None,
     ) -> dict[str, Any]:
         name = self._name(name)
+        if not isinstance(common_items, list) or len(common_items) > 50:
+            raise ChecklistError("common_items must contain at most 50 entries.")
         common = [self._pack_item_values(item) for item in common_items]
         variant_values = self._variant_values(variants or [])
         description = self._text(description, "description", 500)
@@ -819,8 +826,44 @@ class Repository:
                         f"A pack named {name!r} already exists.", code="conflict"
                     ) from exc
             if common_items is not None or variants is not None:
-                common = [self._pack_item_values(item) for item in (common_items or [])]
-                variant_values = self._variant_values(variants or [])
+                if common_items is not None and (
+                    not isinstance(common_items, list) or len(common_items) > 50
+                ):
+                    raise ChecklistError("common_items must contain at most 50 entries.")
+                common = (
+                    [self._pack_item_values(item) for item in common_items]
+                    if common_items is not None
+                    else None
+                )
+                variant_values = self._variant_values(variants) if variants is not None else None
+                current_items = connection.execute(
+                    "SELECT * FROM pack_items WHERE pack_id = ? ORDER BY position, id", (pack_id,)
+                ).fetchall()
+                if common is None:
+                    common = [
+                        {
+                            "name": row["name"],
+                            "group_name": row["group_name"],
+                            "quantity": row["quantity"],
+                            "unit": row["unit"],
+                            "note": row["note"],
+                        }
+                        for row in current_items
+                        if row["variant"] is None
+                    ]
+                if variant_values is None:
+                    variant_values = {}
+                    for row in current_items:
+                        if row["variant"] is not None:
+                            variant_values.setdefault(row["variant"], []).append(
+                                {
+                                    "name": row["name"],
+                                    "group_name": row["group_name"],
+                                    "quantity": row["quantity"],
+                                    "unit": row["unit"],
+                                    "note": row["note"],
+                                }
+                            )
                 connection.execute("DELETE FROM pack_items WHERE pack_id = ?", (pack_id,))
                 self._insert_pack_items(connection, pack_id, common, variant_values)
             return self._pack_from_connection(connection, pack_id)

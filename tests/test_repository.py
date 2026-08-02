@@ -75,6 +75,43 @@ def test_unknown_bulk_update_has_no_partial_write(repository):
     assert not repository.get_journey(journey["id"])["items"][0]["packed"]
 
 
+def test_bulk_update_rejects_duplicate_item_ids(repository):
+    journey = repository.start_journey("Trip")
+    added = repository.add_items("journey", journey["id"], [{"name": "passport"}])
+    with pytest.raises(ChecklistError, match="only once"):
+        repository.update_items(
+            "journey",
+            journey["id"],
+            [
+                {"item_id": added["item_ids"][0], "packed": True},
+                {"item_id": added["item_ids"][0], "not_needed": True},
+            ],
+        )
+    item = repository.get_journey(journey["id"])["items"][0]
+    assert not item["packed"] and not item["not_needed"]
+
+
+def test_partial_pack_update_preserves_unspecified_definitions(repository):
+    pack = repository.create_pack(
+        "vacation",
+        [{"name": "passport"}],
+        [{"label": "winter", "items": [{"name": "wool hat"}]}],
+    )
+    updated = repository.update_pack(pack["id"], common_items=[{"name": "wallet"}])
+    assert [item["name"] for item in updated["common"]] == ["wallet"]
+    assert [item["name"] for item in updated["variants"]["winter"]] == ["wool hat"]
+
+
+def test_blueprint_and_pack_item_lists_are_bounded(repository):
+    with pytest.raises(ChecklistError, match="at most 50"):
+        repository.create_blueprint("too many", [{"name": "item"}] * 51)
+    with pytest.raises(ChecklistError, match="at most 50"):
+        repository.create_pack("too many", [{"name": "item"}] * 51)
+    pack = repository.create_pack("bounded", [{"name": "item"}])
+    with pytest.raises(ChecklistError, match="at most 50"):
+        repository.update_pack(pack["id"], common_items=[{"name": "item"}] * 51)
+
+
 def test_restart_persistence(repository):
     journey = repository.start_journey("Persistent")
     repository.add_items("journey", journey["id"], [{"name": "charger"}])

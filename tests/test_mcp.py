@@ -43,3 +43,11 @@ def test_ui_contract_is_registered():
     app = create_app("/tmp/journey-checklist-test.sqlite3")
     resource = asyncio.run(app.state.mcp.get_resource(UI_URI))
     assert resource is not None
+
+
+def test_ui_contract_uses_mcp_app_lifecycle_and_tool_notifications():
+    ui = import_module("src.journey_checklist.ui")
+    assert "sendRequest('ui/initialize'" in ui.CHECKLIST_HTML
+    assert "ui/notifications/initialized" in ui.CHECKLIST_HTML
+    assert "ui/notifications/tool-result" in ui.CHECKLIST_HTML
+    assert "message?.params" in ui.CHECKLIST_HTML

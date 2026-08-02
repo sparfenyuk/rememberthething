@@ -26,13 +26,20 @@ def journey_hints(journey: dict[str, Any], packs: dict[str, Any]) -> list[dict[s
     if not packs["packs"]:
         return []
     has_variants = any(pack["variants"] for pack in packs["packs"])
-    needs = ["season"] if has_variants and not journey["context"].get("season") else []
+    if has_variants and not journey["context"].get("season"):
+        return [
+            _hint(
+                "update_journey",
+                "Add the journey season before choosing a seasonal pack variant.",
+                {"journey_id": journey["id"]},
+                needs=["season"],
+            )
+        ]
     return [
         _hint(
             "list_packs",
             "Review reusable packs before adding more checklist items.",
             {"journey_id": journey["id"]},
-            needs=needs,
         )
     ]
 

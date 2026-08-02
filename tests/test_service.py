@@ -28,3 +28,13 @@ def test_service_rejects_unknown_target_without_mutation(tmp_path):
     assert is_error is True
     assert result["error"]["code"] == "not_found"
     assert result["next_steps"] == []
+
+
+def test_season_hint_targets_update_journey(tmp_path):
+    service = ChecklistService(Repository(tmp_path / "service.sqlite3"))
+    service.create_pack("seasonal", [], [{"label": "winter", "items": [{"name": "coat"}]}])
+    journey = service.start_journey("Trip")["affected"]["journey"]
+    hint = service.update_journey(journey["id"], {})["next_steps"][0]
+    assert hint["tool"] == "update_journey"
+    assert hint["arguments"] == {"journey_id": journey["id"]}
+    assert hint["needs"] == ["season"]
