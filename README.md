@@ -38,6 +38,8 @@ The tools are target-explicit: journeys and blueprints own copied item rows; pac
 }
 ```
 
+Every tool advertises a generated output schema for this envelope. `affected` contains the operation-specific payload; successful `include_pack` results may also include `conflicts`, while rejected operations include `error` without changing the text content or `isError` signal.
+
 ## LM-driven photo workflow
 
 The connected LM owns the conversation: gather destination, dates, duration, purpose, and season; understand any user-provided packing photo; choose a pack or explicit variant; then call the tools. The server stores checklist context, item data, reusable blueprints and packs, and item provenance. It does not accept photo bytes, call vision services, infer recommendations, or silently choose seasonal variants.

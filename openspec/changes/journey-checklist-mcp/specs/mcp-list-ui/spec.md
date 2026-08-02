@@ -79,16 +79,16 @@ When the MCP client does not support MCP Apps rendering, the system SHALL keep a
 - **WHEN** a client calls the MCP server without UI rendering support
 - **THEN** the client can list, create, read, and mutate journeys using structured results without relying on browser-only state
 
-### Requirement: Blueprint output schema
+### Requirement: Tool output schemas
 
-The `create_blueprint` tool SHALL advertise an MCP output schema for its structured result. Successful results SHALL describe the created blueprint and its complete item state; rejected results SHALL retain the existing error envelope.
+Every MCP tool SHALL advertise an MCP output schema for its shared structured result envelope. Operation-specific payloads SHALL remain under `affected`; successful `include_pack` results MAY include `conflicts`; rejected results SHALL retain the existing error envelope.
 
-#### Scenario: Client discovers the blueprint result contract
+#### Scenario: Client discovers every tool result contract
 
 - **WHEN** a client lists the available tools
-- **THEN** `create_blueprint` includes an output schema for its structured content
+- **THEN** every registered tool includes an output schema for its structured content
 
-#### Scenario: Blueprint result validates against the advertised schema
+#### Scenario: Success and error results validate against the advertised schema
 
-- **WHEN** a client creates a blueprint with checklist items
-- **THEN** the structured result validates against the advertised schema and the existing text content, error signaling, and MCP Apps behavior remain unchanged
+- **WHEN** a client calls a checklist, blueprint, journey, or pack tool
+- **THEN** success and error structured results validate against the advertised schema and the existing text content, error signaling, and MCP Apps behavior remain unchanged
