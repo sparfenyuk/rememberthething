@@ -1,0 +1,47 @@
+[project]
+name = "journey-checklist-mcp"
+version = "0.1.0"
+description = "Persistent journey checklists exposed through FastMCP."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastmcp==3.4.5",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.15,<2",
+    "pytest>=8.3,<9",
+    "pytest-asyncio>=0.24,<1",
+    "ruff>=0.11,<0.13",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/journey_checklist/ui.py" = ["E501"]
+"src/journey_checklist/http_app.py" = ["E501"]
+"src/journey_checklist/repository.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+check_untyped_defs = true
+disallow_untyped_defs = true
+warn_return_any = true
+warn_unused_ignores = true
+exclude = "tests"

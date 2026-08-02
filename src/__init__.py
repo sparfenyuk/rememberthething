@@ -1,0 +1,1 @@
+"""LMStash entrypoint package."""

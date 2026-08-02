@@ -1,0 +1,93 @@
+UI_URI = "ui://journey-checklist/checklist.html"
+
+
+CHECKLIST_HTML = r"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Journey checklist</title>
+  <style>
+    :root { color-scheme: light; --ink:#17211d; --muted:#68756d; --paper:#f7f5ef; --card:#fffdf8; --line:#dfe3db; --teal:#0b776e; --gold:#d6a63b; --red:#a13f3f; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:radial-gradient(circle at 92% 0,#d9eee6 0,transparent 34%),var(--paper); color:var(--ink); font:15px/1.45 "Avenir Next","Trebuchet MS",sans-serif; }
+    main { max-width:760px; margin:auto; padding:28px 18px 48px; }
+    header { display:flex; justify-content:space-between; gap:18px; align-items:flex-start; margin-bottom:22px; }
+    h1,h2,h3,p { margin:0; } h1 { font:700 32px/1.05 Georgia,serif; letter-spacing:-.03em; } h2 { font-size:18px; } h3 { font-size:13px; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); }
+    .eyebrow { color:var(--teal); font-size:11px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; margin-bottom:7px; }
+    .context { color:var(--muted); margin-top:8px; }
+    .summary { background:var(--ink); color:white; border-radius:18px; padding:17px 18px; min-width:130px; text-align:right; }
+    .summary strong { display:block; font:700 26px Georgia,serif; color:#e9c66d; }
+    section { background:color-mix(in srgb,var(--card) 92%,transparent); border:1px solid var(--line); border-radius:16px; padding:16px; margin-top:14px; box-shadow:0 8px 24px #18352b0a; }
+    .section-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px; }
+    .items { display:grid; gap:8px; }
+    .item { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:10px; border:1px solid var(--line); border-radius:12px; padding:10px 11px; background:#fff; }
+    .item.done { opacity:.58; } .item.done .item-name { text-decoration:line-through; } .item.not-needed { background:#f1f2ed; }
+    .item-name { font-weight:700; overflow-wrap:anywhere; } .item-note { color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
+    .source { color:var(--muted); font-size:11px; } .source.direct { color:var(--teal); }
+    button { border:1px solid var(--line); border-radius:999px; padding:8px 12px; background:#fff; color:var(--ink); font:inherit; cursor:pointer; } button:hover,button:focus-visible { border-color:var(--teal); outline:3px solid #0b776e33; } button.primary { background:var(--teal); border-color:var(--teal); color:#fff; } button.danger { color:var(--red); }
+    .actions { display:flex; flex-wrap:wrap; gap:8px; } .empty { color:var(--muted); padding:8px 0; }
+    form { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; } input { min-width:0; border:1px solid var(--line); border-radius:10px; padding:10px 11px; background:#fff; color:var(--ink); font:inherit; } input:focus { outline:3px solid #0b776e33; border-color:var(--teal); }
+    .hint { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:10px 0; border-top:1px solid var(--line); } .hint:first-of-type { border-top:0; } .hint p { color:var(--muted); font-size:13px; } .error { color:var(--red); background:#fff0ed; border-color:#efc2bb; }
+    @media (max-width:460px) { main { padding:20px 12px 36px; } header { display:block; } .summary { margin-top:14px; text-align:left; } .item { grid-template-columns:auto minmax(0,1fr); } .item .actions { grid-column:2; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div><div class="eyebrow">journey checklist</div><h1 id="title">Waiting for a journey</h1><p id="context" class="context">Open this tool from an existing journey.</p></div>
+    <div class="summary"><strong id="remaining">—</strong><span>remaining</span></div>
+  </header>
+  <div id="message" aria-live="polite"></div>
+  <section><div class="section-head"><h2>Checklist</h2><div class="actions"><button id="packs" type="button">Browse packs</button><button id="blueprint" type="button">Remember items</button></div></div><div id="groups"></div></section>
+  <section><div class="section-head"><h2>Add something</h2></div><form id="add-form"><label class="sr-only" for="new-item">Item name</label><input id="new-item" name="name" maxlength="200" placeholder="e.g. portable umbrella" required><button class="primary" type="submit">Add item</button></form></section>
+  <section id="hints-section" hidden><div class="section-head"><h2>Useful next steps</h2></div><div id="hints"></div></section>
+</main>
+<script>
+  const pending = new Map(); let nextId = 1; let journey = null; let lastResult = null;
+  const $ = (id) => document.getElementById(id);
+  function envelope(message) {
+    const candidate = message?.structuredContent || message?.result?.structuredContent || message?.result || message;
+    if (candidate?.summary) return candidate;
+    const text = candidate?.content?.find?.((part) => part.type === 'text')?.text;
+    try { return JSON.parse(text); } catch (_) { return null; }
+  }
+  window.addEventListener('message', (event) => {
+    const data = event.data || {};
+    if (data.id && pending.has(data.id)) { const call = pending.get(data.id); pending.delete(data.id); data.error ? call.reject(new Error(data.error.message || 'Tool call failed')) : call.resolve(envelope(data)); }
+    const incoming = envelope(data); if (incoming) apply(incoming);
+  });
+  function callTool(name, args) { return new Promise((resolve, reject) => { const id = `journey-${nextId++}`; pending.set(id, {resolve, reject}); window.parent.postMessage({jsonrpc:'2.0', id, method:'tools/call', params:{name, arguments:args}}, '*'); }); }
+  function apply(result) {
+    lastResult = result;
+    if (result.error) { showError(result.error.message || 'The change was rejected.'); return; }
+    const next = result.affected?.journey || result.affected?.target?.id && result.affected.target;
+    if (next?.items) { journey = next; render(); }
+    renderHints(result.next_steps || []);
+  }
+  function showError(text) { $('message').innerHTML = `<section class="error" role="alert">${escapeHtml(text)}</section>`; }
+  function clearError() { $('message').innerHTML = ''; }
+  function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+  function render() {
+    clearError(); $('title').textContent = journey.name; const context = Object.entries(journey.context || {}).filter(([,v]) => v != null).map(([k,v]) => `${k.replaceAll('_',' ')}: ${v}`).join(' · '); $('context').textContent = context || 'No context added yet'; $('remaining').textContent = journey.remaining_count;
+    const groups = {}; journey.items.forEach((item) => (groups[item.group || 'Other'] ||= []).push(item)); const root = $('groups'); root.innerHTML = '';
+    if (!journey.items.length) { root.innerHTML = '<p class="empty">Nothing here yet. Add the first thing you want to remember.</p>'; return; }
+    Object.entries(groups).forEach(([group, items]) => { const section = document.createElement('div'); section.innerHTML = `<h3>${escapeHtml(group)}</h3><div class="items"></div>`; const list = section.querySelector('.items'); items.forEach((item) => list.appendChild(itemNode(item))); root.appendChild(section); });
+  }
+  function itemNode(item) {
+    const row = document.createElement('div'); row.className = `item ${item.packed ? 'done' : ''} ${item.not_needed ? 'not-needed' : ''}`;
+    row.innerHTML = `<input type="checkbox" aria-label="Mark ${escapeHtml(item.name)} packed" ${item.packed ? 'checked' : ''} ${item.not_needed ? 'disabled' : ''}><div><div class="item-name">${escapeHtml(item.name)} <span class="source ${item.source.kind === 'direct' ? 'direct' : ''}">${escapeHtml(item.source.kind)}</span></div><div class="item-note">${item.quantity}${item.unit ? ` ${escapeHtml(item.unit)}` : ''}${item.note ? ` · ${escapeHtml(item.note)}` : ''}</div></div><div class="actions"><button type="button" data-edit>Edit</button><button class="danger" type="button" data-remove>Remove</button></div>`;
+    row.querySelector('input').addEventListener('change', () => mutate('update_items', {target_type:'journey', target_id:journey.id, updates:[{item_id:item.id, packed:row.querySelector('input').checked}]}));
+    row.querySelector('[data-edit]').addEventListener('click', () => { const name = prompt('Item name', item.name); if (name && name.trim() !== item.name) mutate('update_items', {target_type:'journey', target_id:journey.id, updates:[{item_id:item.id, name:name.trim()}]}); });
+    row.querySelector('[data-remove]').addEventListener('click', () => { if (confirm(`Remove ${item.name}?`)) mutate('remove_items', {target_type:'journey', target_id:journey.id, item_ids:[item.id]}); }); return row;
+  }
+  async function mutate(tool, args) { try { const result = await callTool(tool,args); apply(result); } catch (error) { showError(error.message); } }
+  $('add-form').addEventListener('submit', (event) => { event.preventDefault(); const name = $('new-item').value.trim(); if (!name || !journey) return; mutate('add_items', {target_type:'journey', target_id:journey.id, items:[{name}]}); $('new-item').value = ''; });
+  $('blueprint').addEventListener('click', () => { if (!journey) return; const direct = journey.items.filter((item) => item.source.kind === 'direct'); if (!direct.length) return showError('Add a direct item before remembering it.'); const args = {journey_id:journey.id, item_ids:direct.map((item) => item.id)}; if (journey.source_blueprint_id) args.blueprint_id = journey.source_blueprint_id; else { const name = prompt('New blueprint name'); if (!name) return; args.new_blueprint_name = name; } if (confirm('Save these direct items to the blueprint?')) mutate('promote_items', args); });
+  $('packs').addEventListener('click', async () => { if (!journey) return; try { const result = await callTool('list_packs', {journey_id:journey.id}); apply(result); showPacks(result.affected?.packs || result.affected?.packs?.packs || result.affected?.packs); } catch (error) { showError(error.message); } });
+  function showPacks(data) { const packs = data?.packs || []; if (!packs.length) return showError('No reusable packs yet.'); const section = $('hints-section'); section.hidden = false; $('hints').innerHTML = packs.map((pack) => `<div class="hint"><p><strong>${escapeHtml(pack.name)}</strong><br>${pack.common_item_count} common item(s) · ${(pack.variants || []).join(', ') || 'no variants'}</p><span class="actions"><button data-pack="${pack.id}">Include common</button>${(pack.variants || []).map((variant) => `<button data-pack="${pack.id}" data-variant="${escapeHtml(variant)}">${escapeHtml(variant)}</button>`).join('')}</span></div>`).join(''); $('hints').querySelectorAll('[data-pack]').forEach((button) => button.addEventListener('click', () => mutate('include_pack', {target_type:'journey', target_id:journey.id, pack_id:button.dataset.pack, ...(button.dataset.variant ? {variant:button.dataset.variant} : {})}))); }
+  function renderHints(hints) { const section = $('hints-section'); if (!hints.length) { section.hidden = true; return; } section.hidden = false; $('hints').innerHTML = hints.map((hint, index) => `<div class="hint"><p>${escapeHtml(hint.reason)}${hint.needs.length ? `<br>Needs: ${escapeHtml(hint.needs.join(', '))}` : ''}</p><button data-hint="${index}">Open</button></div>`).join(''); $('hints').querySelectorAll('[data-hint]').forEach((button) => button.addEventListener('click', () => activateHint(hints[button.dataset.hint]))); }
+  async function activateHint(hint) { const args = {...hint.arguments}; for (const need of hint.needs || []) { const value = prompt(`Provide ${need}`); if (!value) return; if (need === 'variant') args.variant = value; else if (need.includes('or')) args.new_blueprint_name = value; else args[need] = value; } if (hint.requires_confirmation && !confirm(hint.reason)) return; mutate(hint.tool, args); }
+</script>
+</body>
+</html>"""

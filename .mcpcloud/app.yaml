@@ -1,0 +1,31 @@
+runtime: python
+python: "3.12"
+
+build:
+  package_manager: uv
+  frozen_lockfile: true
+
+app:
+  entrypoint: src.server:app
+  protocol: asgi
+
+mcp:
+  transport: streamable-http
+  path: /mcp
+
+health:
+  path: /healthz
+
+oauth:
+  scopes:
+    - mcp:invoke
+
+resources:
+  cpu: 1
+  memory_mb: 512
+  timeout_seconds: 30
+
+storage:
+  - name: data
+    mount_path: /data
+    size_gb: 1
