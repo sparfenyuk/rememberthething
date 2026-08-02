@@ -35,6 +35,28 @@ async def test_mcp_initialize_tools_and_tool_only_flow(tmp_path, monkeypatch):
                     assert payload["affected"]["journey"]["name"] == "Berlin"
 
 
+@pytest.mark.asyncio
+async def test_origin_token_auth_statuses_and_healthz(tmp_path, monkeypatch):
+    monkeypatch.setenv("LMSTASH_ORIGIN_TOKEN", "secret")
+    monkeypatch.delenv("MCP_ORIGIN_TOKEN", raising=False)
+    from src.server import create_app
+
+    app = create_app(tmp_path / "auth.sqlite3")
+    transport = httpx.ASGITransport(app=app)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            for headers, expected_status in (
+                ({}, 401),
+                ({"X-LMStash-Origin-Token": "wrong"}, 401),
+                ({"X-LMStash-Origin-Token": "secret"}, 405),
+            ):
+                response = await client.get("/mcp", headers=headers)
+                assert response.status_code == expected_status
+
+            response = await client.get("/healthz")
+            assert response.status_code == 200
+
+
 def test_ui_contract_is_registered():
     os.environ.setdefault("JOURNEY_CHECKLIST_DB", "/tmp/journey-checklist-test.sqlite3")
     create_app = import_module("src.server").create_app

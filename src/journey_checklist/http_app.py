@@ -60,17 +60,17 @@ class OriginTokenMiddleware:
             await self._reject(send, "MCP host or origin is not allowed.")
             return
         if self.token and (not token or not secrets.compare_digest(token, self.token)):
-            await self._reject(send, "MCP origin token is missing or invalid.")
+            await self._reject(send, "MCP origin token is missing or invalid.", status_code=401)
             return
         await self.app(scope, receive, send)
 
     @staticmethod
-    async def _reject(send: Any, message: str) -> None:
+    async def _reject(send: Any, message: str, status_code: int = 403) -> None:
         body = json.dumps({"error": message}).encode()
         await send(
             {
                 "type": "http.response.start",
-                "status": 403,
+                "status": status_code,
                 "headers": [
                     (b"content-type", b"application/json"),
                     (b"content-length", str(len(body)).encode()),
