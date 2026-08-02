@@ -41,9 +41,7 @@ class ChecklistService:
 
     def update_journey(self, journey_id: str, updates: dict[str, Any]) -> dict[str, Any]:
         journey = self.repository.update_journey(journey_id, updates)
-        hints = []
-        if not journey["context"].get("season"):
-            hints = journey_hints(journey, self.repository.list_packs(journey_id))
+        hints = journey_hints(journey, self.repository.list_packs(journey_id))
         return result_envelope("Journey updated.", {"journey": journey}, next_steps=hints)
 
     def add_items(

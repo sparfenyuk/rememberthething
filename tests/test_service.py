@@ -38,3 +38,5 @@ def test_season_hint_targets_update_journey(tmp_path):
     assert hint["tool"] == "update_journey"
     assert hint["arguments"] == {"journey_id": journey["id"]}
     assert hint["needs"] == ["season"]
+    updated = service.update_journey(journey["id"], {"season": "winter"})
+    assert updated["next_steps"][0]["tool"] == "list_packs"
