@@ -44,7 +44,7 @@ Existing full-list pack variants are migrated by deriving deterministic keys fro
 
 Introduce one shared resolver that expands selected modules, applies each module's selected variant, resolves selected choices, and returns concrete definitions plus provenance paths. `include_module` materializes a new selection; `refresh_composition` re-runs resolution for existing selections.
 
-Materialized rows gain a stable composition/source key. Removing a module-sourced row records a target exclusion before deleting it; refresh skips excluded keys. Manual edits remain on the existing row. New duplicate definitions produce conflicts and never overwrite an edited row. Module and blueprint edits do not rewrite existing target rows unless refresh is explicitly requested.
+Materialized rows gain a stable composition/source key. Removing a module-sourced row records a target exclusion before deleting it; refresh skips excluded keys. Manual edits remain on the existing row. New duplicate definitions produce conflicts and never overwrite an edited row. Module and blueprint edits do not rewrite existing target rows unless refresh is explicitly requested. Module updates that would invalidate a persisted variant or choice selection are rejected so existing compositions remain readable.
 
 This is smaller and safer than attempting a general merge engine. The known ceiling is that conflict resolution remains user/LM-driven; the server reports the alternatives but does not guess.
 

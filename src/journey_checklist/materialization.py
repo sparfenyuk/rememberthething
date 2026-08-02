@@ -41,8 +41,27 @@ class MaterializationMixin:
 
         @classmethod
         def _validate_choice_option(
-            cls, connection: sqlite3.Connection, module_id: str, choice_key: str, option_key: str
-        ) -> tuple[str, str]: ...
+            cls,
+            connection: sqlite3.Connection,
+            module_id: str,
+            choice_key: str,
+            option_key: str,
+            choice_module_id: str | None = None,
+        ) -> tuple[str, str, str]: ...
+
+        @classmethod
+        def _included_module_ids(
+            cls, connection: sqlite3.Connection, module_id: str
+        ) -> set[str]: ...
+
+        @classmethod
+        def _choice_record(
+            cls,
+            connection: sqlite3.Connection,
+            module_id: str,
+            choice_key: str,
+            choice_module_id: str | None = None,
+        ) -> sqlite3.Row: ...
 
         def _insert_item(
             self,
@@ -278,6 +297,18 @@ class MaterializationMixin:
             seen.add(key)
             existing = by_composition.get(key)
             if existing is not None:
+                duplicate = names.get(candidate["name"].casefold())
+                if duplicate is not None and duplicate["id"] != existing["id"]:
+                    conflicts.append(
+                        {
+                            "composition_key": key,
+                            "name": candidate["name"],
+                            "existing_item_id": duplicate["id"],
+                            "reason": "duplicate_name_preserved",
+                            "edited": bool(duplicate["edited"]),
+                        }
+                    )
+                    continue
                 changed = any(
                     existing[field] != candidate.get(field)
                     for field in ("name", "group_name", "quantity", "unit", "note")
@@ -400,14 +431,20 @@ class MaterializationMixin:
         with self._connect() as connection, connection:
             self._require_target(connection, target_type, target_id)
             if selection_id is None:
-                candidates = connection.execute(
-                    """SELECT cs.id, cs.module_id FROM composition_selections cs
-                       JOIN module_choices mc ON mc.module_id = cs.module_id
-                       WHERE cs.target_type = ? AND cs.target_id = ?
-                         AND (mc.choice_key = ? OR mc.id = ?)
-                       ORDER BY cs.position, cs.id""",
-                    (target_type, target_id, choice_key, choice_key),
-                ).fetchall()
+                candidates = []
+                for selection in connection.execute(
+                    "SELECT id, module_id FROM composition_selections "
+                    "WHERE target_type = ? AND target_id = ? ORDER BY position, id",
+                    (target_type, target_id),
+                ).fetchall():
+                    module_ids = self._included_module_ids(connection, selection["module_id"])
+                    placeholders = ", ".join("?" for _ in module_ids)
+                    if connection.execute(
+                        f"SELECT 1 FROM module_choices WHERE module_id IN ({placeholders}) "
+                        "AND (choice_key = ? OR id = ?) LIMIT 1",
+                        (*module_ids, choice_key, choice_key),
+                    ).fetchone():
+                        candidates.append(selection)
                 if len(candidates) != 1:
                     raise ChecklistError(
                         "selection_id is required when the choice is not unique.",
@@ -421,17 +458,17 @@ class MaterializationMixin:
             ).fetchone()
             if selection is None:
                 raise ChecklistError(f"Unknown selection id: {selection_id}.", code="not_found")
-            canonical_choice, canonical_option = self._validate_choice_option(
+            choice_module_id, canonical_choice, canonical_option = self._validate_choice_option(
                 connection, selection["module_id"], choice_key, option_key
             )
             old = connection.execute(
                 "SELECT option_key FROM composition_choices "
                 "WHERE selection_id = ? AND module_id = ? AND choice_key = ?",
-                (selection_id, selection["module_id"], canonical_choice),
+                (selection_id, choice_module_id, canonical_choice),
             ).fetchone()
             conflicts = []
             if old and old["option_key"] != canonical_option:
-                prefix = f"module:{selection['module_id']}:choice:{canonical_choice}:"
+                prefix = f"module:{choice_module_id}:choice:{canonical_choice}:"
                 for row in connection.execute(
                     "SELECT id, edited FROM items "
                     "WHERE target_type = ? AND target_id = ? AND composition_key LIKE ?",
@@ -449,12 +486,12 @@ class MaterializationMixin:
             connection.execute(
                 "DELETE FROM composition_choices "
                 "WHERE selection_id = ? AND module_id = ? AND choice_key = ?",
-                (selection_id, selection["module_id"], canonical_choice),
+                (selection_id, choice_module_id, canonical_choice),
             )
             connection.execute(
                 "INSERT INTO composition_choices(selection_id, module_id, choice_key, option_key) "
                 "VALUES (?, ?, ?, ?)",
-                (selection_id, selection["module_id"], canonical_choice, canonical_option),
+                (selection_id, choice_module_id, canonical_choice, canonical_option),
             )
             result = self._materialize(connection, target_type, target_id)
             result.update(

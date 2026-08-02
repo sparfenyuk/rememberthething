@@ -40,3 +40,23 @@ def test_season_hint_targets_update_journey(tmp_path):
     assert hint["needs"] == ["season"]
     updated = service.update_journey(journey["id"], {"season": "winter"})
     assert updated["next_steps"][0]["tool"] == "list_modules"
+
+
+def test_initial_composition_hints_expose_choice_selection(tmp_path):
+    service = ChecklistService(Repository(tmp_path / "initial-choice-hints.sqlite3"))
+    module = service.repository.create_module(
+        "Video",
+        choices=[
+            {
+                "choice_key": "lens",
+                "label": "Lens",
+                "options": [{"option_key": "prime", "name": "35mm"}],
+            }
+        ],
+    )
+
+    blueprint = service.create_blueprint("Camera", module_selections=[module["id"]])
+    journey = service.start_journey("Trip", module_selections=[module["id"]])
+
+    assert blueprint["next_steps"][0]["tool"] == "select_module_option"
+    assert journey["next_steps"][0]["tool"] == "select_module_option"

@@ -29,7 +29,13 @@ class ChecklistService:
         module_selections: list[dict[str, Any] | str] | None = None,
     ) -> dict[str, Any]:
         blueprint = self.repository.create_blueprint(name, items, module_selections)
-        return result_envelope("Blueprint created.", {"blueprint": blueprint})
+        return result_envelope(
+            "Blueprint created.",
+            {"blueprint": blueprint},
+            next_steps=composition_hints(
+                "blueprint", blueprint["id"], blueprint["unresolved_choices"]
+            ),
+        )
 
     def start_journey(
         self,

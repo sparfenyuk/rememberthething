@@ -21,6 +21,8 @@ def _hint(
 
 
 def journey_hints(journey: dict[str, Any], modules: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if journey.get("unresolved_choices"):
+        return composition_hints("journey", journey["id"], journey["unresolved_choices"])
     if any(item["source"]["kind"] == "module" for item in journey["items"]):
         return []
     if not modules:

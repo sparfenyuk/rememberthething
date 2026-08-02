@@ -42,6 +42,9 @@ class ModuleCrudMixin:
         ) -> list[str]: ...
 
         @classmethod
+        def _module_edges(cls, connection: sqlite3.Connection) -> dict[str, list[str]]: ...
+
+        @classmethod
         def _assert_no_module_cycle(
             cls, connection: sqlite3.Connection, module_id: str, includes: list[str]
         ) -> None: ...
@@ -238,6 +241,12 @@ class ModuleCrudMixin:
                 else [item["module_id"] for item in current["includes"]],
             )
             self._assert_no_module_cycle(connection, module_id, include_ids)
+            self._assert_composition_references_valid(
+                connection,
+                module_id,
+                variant_values if variants is not None else None,
+                choice_values if choices is not None else None,
+            )
             updates: dict[str, Any] = {}
             if name is not None:
                 updates["name"] = self._name(name)
@@ -270,6 +279,72 @@ class ModuleCrudMixin:
                 )
             return self._module_from_connection(connection, module_id)
 
+    @classmethod
+    def _assert_composition_references_valid(
+        cls,
+        connection: sqlite3.Connection,
+        module_id: str,
+        variants: list[dict[str, Any]] | None,
+        choices: list[dict[str, Any]] | None,
+    ) -> None:
+        if variants is None and choices is None:
+            return
+        edges = cls._module_edges(connection)
+
+        def reaches(root: str) -> bool:
+            pending = [root]
+            seen: set[str] = set()
+            while pending:
+                current = pending.pop()
+                if current == module_id:
+                    return True
+                if current in seen:
+                    continue
+                seen.add(current)
+                pending.extend(edges.get(current, []))
+            return False
+
+        variant_labels = {variant["label"] for variant in variants or []}
+        choice_options = {
+            choice["choice_key"]: {option["option_key"] for option in choice["options"]}
+            for choice in choices or []
+        }
+        for selection in connection.execute(
+            "SELECT id, module_id, variant FROM composition_selections"
+        ).fetchall():
+            if not reaches(selection["module_id"]):
+                continue
+            if (
+                variants is not None
+                and selection["module_id"] == module_id
+                and selection["variant"] is not None
+                and selection["variant"] not in variant_labels
+            ):
+                raise ChecklistError(
+                    "Module update would invalidate a selected variant.",
+                    code="conflict",
+                    details={"selection_id": selection["id"], "variant": selection["variant"]},
+                )
+            if choices is None:
+                continue
+            for choice in connection.execute(
+                "SELECT module_id, choice_key, option_key FROM composition_choices "
+                "WHERE selection_id = ? AND module_id = ?",
+                (selection["id"], module_id),
+            ).fetchall():
+                if choice["choice_key"] not in choice_options or (
+                    choice["option_key"] not in choice_options[choice["choice_key"]]
+                ):
+                    raise ChecklistError(
+                        "Module update would invalidate a selected choice.",
+                        code="conflict",
+                        details={
+                            "selection_id": selection["id"],
+                            "choice_key": choice["choice_key"],
+                            "option_key": choice["option_key"],
+                        },
+                    )
+
     def delete_module(self, module_id: str) -> dict[str, Any]:
         with self._connect() as connection, connection:
             row = connection.execute(
@@ -292,12 +367,31 @@ class ModuleCrudMixin:
 
     @classmethod
     def _choice_record(
-        cls, connection: sqlite3.Connection, module_id: str, choice_key: str
+        cls,
+        connection: sqlite3.Connection,
+        module_id: str,
+        choice_key: str,
+        choice_module_id: str | None = None,
     ) -> sqlite3.Row:
-        row = connection.execute(
-            "SELECT * FROM module_choices WHERE module_id = ? AND (choice_key = ? OR id = ?)",
-            (module_id, choice_key, choice_key),
-        ).fetchone()
+        module_ids = cls._included_module_ids(connection, module_id)
+        if choice_module_id is not None:
+            if choice_module_id not in module_ids:
+                raise ChecklistError(
+                    f"Choice module {choice_module_id!r} is not included by module {module_id}."
+                )
+            module_ids = {choice_module_id}
+        placeholders = ", ".join("?" for _ in module_ids)
+        rows = connection.execute(
+            f"SELECT * FROM module_choices WHERE module_id IN ({placeholders}) "
+            "AND (choice_key = ? OR id = ?) ORDER BY module_id, id",
+            (*module_ids, choice_key, choice_key),
+        ).fetchall()
+        if len(rows) > 1:
+            raise ChecklistError(
+                f"Choice {choice_key!r} is ambiguous; provide its choice_id.",
+                code="conflict",
+            )
+        row = rows[0] if rows else None
         if row is None:
             raise ChecklistError(
                 f"Unknown choice {choice_key!r} for module {module_id}.", code="not_found"
@@ -306,9 +400,14 @@ class ModuleCrudMixin:
 
     @classmethod
     def _validate_choice_option(
-        cls, connection: sqlite3.Connection, module_id: str, choice_key: str, option_key: str
-    ) -> tuple[str, str]:
-        choice = cls._choice_record(connection, module_id, choice_key)
+        cls,
+        connection: sqlite3.Connection,
+        module_id: str,
+        choice_key: str,
+        option_key: str,
+        choice_module_id: str | None = None,
+    ) -> tuple[str, str, str]:
+        choice = cls._choice_record(connection, module_id, choice_key, choice_module_id)
         option = connection.execute(
             "SELECT option_key FROM module_choice_options WHERE choice_id = ? AND option_key = ?",
             (choice["id"], option_key),
@@ -326,4 +425,17 @@ class ModuleCrudMixin:
                 f"Unknown option {option_key!r}; choose one of {available}.",
                 details={"available_options": available},
             )
-        return choice["choice_key"], option["option_key"]
+        return choice["module_id"], choice["choice_key"], option["option_key"]
+
+    @classmethod
+    def _included_module_ids(cls, connection: sqlite3.Connection, module_id: str) -> set[str]:
+        edges = cls._module_edges(connection)
+        pending = [module_id]
+        result: set[str] = set()
+        while pending:
+            current = pending.pop()
+            if current in result:
+                continue
+            result.add(current)
+            pending.extend(edges.get(current, []))
+        return result

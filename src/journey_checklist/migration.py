@@ -59,13 +59,33 @@ class LegacyPackMigrationMixin:
                     ),
                 )
             except sqlite3.IntegrityError:
+                suffix = f" (legacy {pack['id']})"
+                module_name = f"{pack['name']}{suffix}"
+                suffix_number = 2
+                while connection.execute(
+                    "SELECT 1 FROM modules WHERE name = ?", (module_name,)
+                ).fetchone():
+                    module_name = f"{pack['name']}{suffix} {suffix_number}"
+                    suffix_number += 1
+                connection.execute(
+                    """INSERT INTO modules(
+                        id, name, description, legacy_pack_id, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        module_id,
+                        module_name,
+                        pack["description"],
+                        pack["id"],
+                        pack["created_at"],
+                        pack["updated_at"],
+                    ),
+                )
                 cls._migration_diagnostic(
                     connection,
                     "pack",
                     pack["id"],
-                    "Pack could not be migrated because a module has the same name.",
+                    f"Pack name conflicted with an existing module; migrated as {module_name!r}.",
                 )
-                continue
             rows = connection.execute(
                 "SELECT * FROM pack_items WHERE pack_id = ? ORDER BY position, id", (pack["id"],)
             ).fetchall()
@@ -99,7 +119,9 @@ class LegacyPackMigrationMixin:
                             "VALUES (?, ?, ?)",
                             (variant_id, common_keys[row["id"]], remove_position),
                         )
-                variant_keys = cls._legacy_keys(variant_rows, connection, pack["id"])
+                variant_keys = cls._legacy_keys(
+                    variant_rows, connection, pack["id"], set(common_keys.values())
+                )
                 add_position = 0
                 for row in variant_rows:
                     if row["name"].casefold() in common_by_name:
@@ -126,10 +148,14 @@ class LegacyPackMigrationMixin:
 
     @classmethod
     def _legacy_keys(
-        cls, rows: list[sqlite3.Row], connection: sqlite3.Connection, source_id: str
+        cls,
+        rows: list[sqlite3.Row],
+        connection: sqlite3.Connection,
+        source_id: str,
+        used: set[str] | None = None,
     ) -> dict[str, str]:
         result: dict[str, str] = {}
-        used: set[str] = set()
+        used = set() if used is None else used
         for row in rows:
             base = stable_key(row["name"])
             key = base

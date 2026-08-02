@@ -32,8 +32,13 @@ class CompositionRepositoryMixin:
 
         @classmethod
         def _validate_choice_option(
-            cls, connection: sqlite3.Connection, module_id: str, choice_key: str, option_key: str
-        ) -> tuple[str, str]: ...
+            cls,
+            connection: sqlite3.Connection,
+            module_id: str,
+            choice_key: str,
+            option_key: str,
+            choice_module_id: str | None = None,
+        ) -> tuple[str, str, str]: ...
 
     @classmethod
     def _composition_view(
@@ -136,13 +141,16 @@ class CompositionRepositoryMixin:
                 option_key = choice.get("option_key")
                 if not isinstance(choice_key, str) or not isinstance(option_key, str):
                     raise ChecklistError("Choice selections require choice_key and option_key.")
-                canonical_choice, canonical_option = cls._validate_choice_option(
-                    connection, module_id, choice_key, option_key
+                choice_module_id = choice.get("module_id")
+                if choice_module_id is not None and not isinstance(choice_module_id, str):
+                    raise ChecklistError("choice module_id must be a string.")
+                canonical_module, canonical_choice, canonical_option = cls._validate_choice_option(
+                    connection, module_id, choice_key, option_key, choice_module_id
                 )
                 connection.execute(
                     "INSERT INTO composition_choices("
                     "selection_id, module_id, choice_key, option_key) VALUES (?, ?, ?, ?)",
-                    (selection_id, module_id, canonical_choice, canonical_option),
+                    (selection_id, canonical_module, canonical_choice, canonical_option),
                 )
             ids.append(selection_id)
         return ids
