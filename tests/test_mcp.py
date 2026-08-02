@@ -285,3 +285,5 @@ def test_ui_contract_uses_mcp_app_lifecycle_and_tool_notifications():
     assert "refresh_composition" in ui.CHECKLIST_HTML
     assert "source.path" in ui.CHECKLIST_HTML
     assert "Modules in this checklist" in ui.CHECKLIST_HTML
+    assert 'data-choice="${escapeHtml(choice.choice_id)}"' in ui.CHECKLIST_HTML
+    assert 'data-choice="${escapeHtml(choice.choice_key)}"' not in ui.CHECKLIST_HTML

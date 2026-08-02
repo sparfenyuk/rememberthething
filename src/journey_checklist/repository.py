@@ -478,8 +478,10 @@ class Repository(
             self._add_module_selections(
                 connection, "blueprint", blueprint_id, module_selections or []
             )
-            self._materialize(connection, "blueprint", blueprint_id)
-            return self._blueprint(connection, blueprint_id)
+            materialized = self._materialize(connection, "blueprint", blueprint_id)
+            blueprint = self._blueprint(connection, blueprint_id)
+            blueprint["conflicts"] = materialized["conflicts"]
+            return blueprint
 
     def start_journey(
         self,
@@ -539,10 +541,14 @@ class Repository(
                         else ItemSource("blueprint", blueprint_id, blueprint["name"]),
                         row["composition_key"],
                     )
-                self._copy_composition(connection, "blueprint", blueprint_id, "journey", journey_id)
+                self._copy_composition(
+                    connection, "blueprint", blueprint_id, "journey", journey_id
+                )
             self._add_module_selections(connection, "journey", journey_id, module_selections or [])
-            self._materialize(connection, "journey", journey_id)
-            return self._journey(connection, journey_id)
+            materialized = self._materialize(connection, "journey", journey_id)
+            journey = self._journey(connection, journey_id)
+            journey["conflicts"] = materialized["conflicts"]
+            return journey
 
     @classmethod
     def _context_values(cls, context: dict[str, Any]) -> dict[str, Any]:

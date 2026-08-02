@@ -323,6 +323,7 @@ class MaterializationMixin:
                         }
                     )
                 elif changed:
+                    old_name = existing["name"].casefold()
                     connection.execute(
                         "UPDATE items SET name = ?, group_name = ?, quantity = ?, unit = ?, "
                         "note = ?, source_type = ?, source_id = ?, source_label = ?, "
@@ -342,6 +343,12 @@ class MaterializationMixin:
                             existing["id"],
                         ),
                     )
+                    indexed = names.get(old_name)
+                    if indexed is not None and indexed["id"] == existing["id"]:
+                        names.pop(old_name)
+                    names[candidate["name"].casefold()] = connection.execute(
+                        "SELECT * FROM items WHERE id = ?", (existing["id"],)
+                    ).fetchone()
                 continue
             duplicate = names.get(candidate["name"].casefold())
             if duplicate is not None:

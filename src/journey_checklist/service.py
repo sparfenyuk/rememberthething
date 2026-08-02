@@ -35,6 +35,7 @@ class ChecklistService:
             next_steps=composition_hints(
                 "blueprint", blueprint["id"], blueprint["unresolved_choices"]
             ),
+            conflicts=blueprint["conflicts"],
         )
 
     def start_journey(
@@ -46,7 +47,12 @@ class ChecklistService:
     ) -> dict[str, Any]:
         journey = self.repository.start_journey(name, context, blueprint_id, module_selections)
         hints = journey_hints(journey, self.repository.list_modules())
-        return result_envelope("Journey started.", {"journey": journey}, next_steps=hints)
+        return result_envelope(
+            "Journey started.",
+            {"journey": journey},
+            next_steps=hints,
+            conflicts=journey["conflicts"],
+        )
 
     def get_journey(self, journey_id: str) -> dict[str, Any]:
         journey = self.repository.get_journey(journey_id)

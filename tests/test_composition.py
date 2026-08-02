@@ -108,6 +108,30 @@ def test_refresh_reports_duplicate_name_when_source_key_exists(tmp_path):
     assert [item["name"] for item in refreshed["target"]["items"]] == ["Umbrella", "Coat"]
 
 
+def test_refresh_updates_name_index_before_next_source_key(tmp_path):
+    repository = Repository(tmp_path / "duplicate-refresh.sqlite3")
+    module = repository.create_module(
+        "Work",
+        [
+            {"item_key": "first", "name": "First"},
+            {"item_key": "second", "name": "Second"},
+        ],
+    )
+    journey = repository.start_journey("Trip")
+    repository.include_module("journey", journey["id"], module["id"])
+    repository.update_module(
+        module["id"],
+        common_items=[
+            {"item_key": "first", "name": "Same"},
+            {"item_key": "second", "name": "Same"},
+        ],
+    )
+
+    refreshed = repository.refresh_composition("journey", journey["id"])
+    assert refreshed["conflicts"][0]["reason"] == "duplicate_name_preserved"
+    assert [item["name"] for item in refreshed["target"]["items"]] == ["Same", "Second"]
+
+
 def test_module_update_rejects_invalidating_selected_variant(tmp_path):
     repository = Repository(tmp_path / "stale-selection.sqlite3")
     module = repository.create_module(

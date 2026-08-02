@@ -60,3 +60,32 @@ def test_initial_composition_hints_expose_choice_selection(tmp_path):
 
     assert blueprint["next_steps"][0]["tool"] == "select_module_option"
     assert journey["next_steps"][0]["tool"] == "select_module_option"
+
+
+def test_creation_conflicts_are_returned_for_blueprints_and_journeys(tmp_path):
+    service = ChecklistService(Repository(tmp_path / "creation-conflicts.sqlite3"))
+    module = service.repository.create_module(
+        "Packing", [{"item_key": "passport", "name": "Passport"}]
+    )
+
+    blueprint = service.create_blueprint(
+        "Trip", [{"name": "Passport"}], [module["id"]]
+    )
+    assert blueprint["conflicts"][0]["reason"] == "duplicate_name_preserved"
+    blueprint_id = blueprint["affected"]["blueprint"]["id"]
+
+    journey = service.start_journey("Trip", blueprint_id=blueprint_id)
+    assert journey["conflicts"][0]["reason"] == "duplicate_name_preserved"
+
+
+def test_include_module_does_not_hint_a_second_variant_selection(tmp_path):
+    service = ChecklistService(Repository(tmp_path / "variant-hints.sqlite3"))
+    module = service.repository.create_module(
+        "Packing",
+        [{"item_key": "base", "name": "Base"}],
+        variants=[{"label": "alt", "add": [{"item_key": "extra", "name": "Extra"}]}],
+    )
+    journey = service.start_journey("Trip")["affected"]["journey"]
+
+    included = service.include_module("journey", journey["id"], module["id"])
+    assert included["next_steps"] == []

@@ -100,17 +100,7 @@ def include_module_hints(
     available_variants: list[str],
     variant: str | None,
 ) -> list[dict[str, Any]]:
-    if variant is not None or not available_variants:
-        return []
-    return [
-        _hint(
-            "include_module",
-            "Choose a module variant explicitly; the server will not infer one.",
-            {"target_type": target_type, "target_id": target_id, "module_id": module_id},
-            needs=["variant"],
-            confirmation=True,
-        )
-    ]
+    return []
 
 
 def composition_hints(
