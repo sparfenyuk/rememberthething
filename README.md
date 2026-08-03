@@ -14,6 +14,67 @@ JOURNEY_CHECKLIST_DB=.data/journey_checklist.sqlite3 uv run uvicorn src.server:a
 The MCP endpoint is `http://127.0.0.1:8000/mcp`; readiness is `http://127.0.0.1:8000/healthz`.
 The app defaults to `/data/journey_checklist.sqlite3` when `JOURNEY_CHECKLIST_DB` is not set, matching the declared LMStash mount.
 
+## Use it with ChatGPT
+
+Deploy the server first so ChatGPT can reach its `/mcp` endpoint. In the ChatGPT desktop app, open **Settings → MCP servers → Add server**, choose **Streamable HTTP**, enter the deployed MCP URL, save, and restart ChatGPT. Type `/mcp` in the composer to confirm that the server is connected. ChatGPT web uses remote MCP tools supplied by an enabled plugin in a ChatGPT Work workspace; it cannot reach a local `127.0.0.1` server.
+
+The server stores journeys, blueprints, packs, and checklist state. ChatGPT handles the conversation: it can ask for missing trip details, interpret a packing photo, choose an explicit pack variant, and call the tools. Review write actions when ChatGPT asks for confirmation. The server returns `next_steps` after relevant actions so ChatGPT can suggest a pack, variant, or blueprint promotion without making that extra change silently.
+
+### Travelling for a week
+
+Start with a natural-language request:
+
+```text
+Start a journey called “Lisbon vacation”. I will stay 7 days in Lisbon in July.
+Use my vacation blueprint, include the warm-weather variant of my Vacation pack,
+and show me the checklist. Ask before adding anything that is not already in
+the blueprint or pack.
+```
+
+Continue the same conversation as plans change:
+
+```text
+I attached a photo of the things on my bed. Identify the items you can see and
+add only the items I confirm to the Lisbon journey. Afterward, tell me which
+new items could be promoted to my vacation blueprint, but do not promote them
+yet.
+```
+
+### Short business trip
+
+```text
+Create a journey called “Berlin client visit” for a 2-day business trip in
+October. Start with my Work blueprint and include Toiletries. Ask me which
+variant to use when a pack has alternatives. Then show the todo list.
+```
+
+The checklist can be updated during preparation:
+
+```text
+Mark the laptop and presentation clicker as packed, remove the second pair of
+shoes, and add a USB-C charger. Keep the charger as a direct journey item for
+now; suggest how I can add it to my Work blueprint for future trips.
+```
+
+### One-day weekend hike
+
+```text
+Start a journey called “Saturday hike” for a one-day hike in the Harz
+Mountains this weekend. Use my Hiking pack, exclude overnight items, and ask
+which alternatives to choose for any one-of-many items. Keep the checklist
+focused on things I need to carry today.
+```
+
+If the same hike becomes a recurring activity:
+
+```text
+I added a headlamp and blister kit to this journey. Promote both to my Weekend
+Hiking blueprint so they appear next time, then show the remaining unpacked
+items.
+```
+
+The app does not receive photo bytes or make travel recommendations itself. ChatGPT interprets the conversation or attached image and sends the resulting item names and trip context to the MCP tools.
+
 ## LMStash contract
 
 `.mcpcloud/app.yaml` is the authoritative LMStash manifest for the runtime, ASGI entrypoint, MCP transport, health route, OAuth, resources, and durable storage. Run the platform checker when the `lmstash` CLI is available:
