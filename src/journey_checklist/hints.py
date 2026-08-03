@@ -131,9 +131,10 @@ def composition_hints(
     unresolved_choices: list[dict[str, Any]],
     *,
     selected_modules: list[dict[str, Any]] | None = None,
+    preferred_selection_id: str | None = None,
     conflicts: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    hints = [
+    variant_hints = [
         hint
         for module in selected_modules or []
         for hint in include_module_hints(
@@ -145,23 +146,29 @@ def composition_hints(
             module.get("variant"),
         )
     ]
-    hints.extend(
-        [
-            _hint(
-                "select_module_option",
-                f"Resolve the {choice['label']} choice explicitly.",
-                {
-                    "target_type": target_type,
-                    "target_id": target_id,
-                    "selection_id": choice["selection_id"],
-                    "choice_id": choice["choice_id"],
-                },
-                needs=["option_key"],
-                confirmation=True,
+    choice_hints = [
+        _hint(
+            "select_module_option",
+            f"Resolve the {choice['label']} choice explicitly.",
+            {
+                "target_type": target_type,
+                "target_id": target_id,
+                "selection_id": choice["selection_id"],
+                "choice_id": choice["choice_id"],
+            },
+            needs=["option_key"],
+            confirmation=True,
+        )
+        for choice in unresolved_choices
+    ]
+    hints = [*choice_hints, *variant_hints]
+    if preferred_selection_id:
+        hints.sort(
+            key=lambda hint: (
+                hint["arguments"]["selection_id"] != preferred_selection_id,
+                hint["tool"] == "include_module",
             )
-            for choice in unresolved_choices
-        ]
-    )
+        )
     if conflicts:
         hints.append(
             _hint(

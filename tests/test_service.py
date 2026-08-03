@@ -86,6 +86,48 @@ def test_initial_composition_hints_update_selected_variant(tmp_path):
         assert hint["needs"] == ["variant"]
 
 
+def test_current_composition_hint_precedes_older_variant_suggestions(tmp_path):
+    service = ChecklistService(Repository(tmp_path / "composition-hint-priority.sqlite3"))
+    previous = [
+        service.repository.create_module(
+            f"Previous {index}", variants=[{"label": "alt", "add": []}]
+        )
+        for index in range(3)
+    ]
+    journey = service.start_journey("Trip")["affected"]["journey"]
+    for module in previous:
+        service.include_module("journey", journey["id"], module["id"])
+
+    choices = service.repository.create_module(
+        "Video",
+        choices=[
+            {
+                "choice_key": "lens",
+                "label": "Lens",
+                "options": [{"option_key": "prime", "name": "35mm"}],
+            }
+        ],
+    )
+    selected_choice = service.include_module("journey", journey["id"], choices["id"])
+    assert selected_choice["next_steps"][0]["tool"] == "select_module_option"
+    assert (
+        selected_choice["next_steps"][0]["arguments"]["selection_id"]
+        == selected_choice["affected"]["selection_id"]
+    )
+
+    variants = service.repository.create_module(
+        "Current", variants=[{"label": "alt", "add": []}]
+    )
+    selected_variant = service.include_module("journey", journey["id"], variants["id"])
+    assert selected_variant["next_steps"][0]["tool"] == "include_module"
+    assert (
+        selected_variant["next_steps"][0]["arguments"]["selection_id"]
+        == selected_variant["affected"]["selection_id"]
+    )
+    assert any(hint["tool"] == "select_module_option" for hint in selected_variant["next_steps"])
+    assert len(selected_variant["next_steps"]) == 3
+
+
 def test_creation_conflicts_are_returned_for_blueprints_and_journeys(tmp_path):
     service = ChecklistService(Repository(tmp_path / "creation-conflicts.sqlite3"))
     module = service.repository.create_module(

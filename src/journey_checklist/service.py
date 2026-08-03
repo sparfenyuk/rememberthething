@@ -216,6 +216,7 @@ class ChecklistService:
             target_id,
             changed["unresolved_choices"],
             selected_modules=changed["target"]["selected_modules"],
+            preferred_selection_id=changed["selection_id"],
             conflicts=changed["conflicts"],
         )
         return result_envelope(
@@ -246,6 +247,7 @@ class ChecklistService:
                 target_id,
                 changed["unresolved_choices"],
                 selected_modules=changed["target"]["selected_modules"],
+                preferred_selection_id=changed["selection_id"],
                 conflicts=changed["conflicts"],
             ),
             conflicts=changed["conflicts"],
