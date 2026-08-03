@@ -27,6 +27,7 @@ class ItemSource:
     source_id: str | None = None
     label: str | None = None
     variant: str | None = None
+    path: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -34,6 +35,7 @@ class ItemSource:
             "id": self.source_id,
             "label": self.label,
             "variant": self.variant,
+            "path": list(self.path),
         }
 
 

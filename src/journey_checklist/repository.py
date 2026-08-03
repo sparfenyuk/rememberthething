@@ -1,17 +1,31 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+from .composition import CompositionRepositoryMixin
+from .legacy_packs import LegacyPackRepositoryMixin
+from .materialization import MaterializationMixin
+from .migration import LegacyPackMigrationMixin
 from .models import ChecklistError, ItemSource
+from .module_crud import ModuleCrudMixin
+from .module_definitions import ModuleDefinitionMixin
 
 TargetType = Literal["journey", "blueprint"]
 
 
-class Repository:
+class Repository(
+    CompositionRepositoryMixin,
+    MaterializationMixin,
+    ModuleCrudMixin,
+    ModuleDefinitionMixin,
+    LegacyPackRepositoryMixin,
+    LegacyPackMigrationMixin,
+):
     """Small transactional SQLite repository for the snapshot-based domain."""
 
     def __init__(self, path: str | Path) -> None:
@@ -47,8 +61,8 @@ class Repository:
         self._schema(connection)
         return connection
 
-    @staticmethod
-    def _schema(connection: sqlite3.Connection) -> None:
+    @classmethod
+    def _schema(cls, connection: sqlite3.Connection) -> None:
         connection.executescript(
             """
             CREATE TABLE IF NOT EXISTS blueprints (
@@ -109,8 +123,122 @@ class Repository:
             );
             CREATE INDEX IF NOT EXISTS items_target_idx ON items(target_type, target_id, position);
             CREATE INDEX IF NOT EXISTS pack_items_pack_idx ON pack_items(pack_id, variant, position);
+
+            CREATE TABLE IF NOT EXISTS modules (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                description TEXT,
+                legacy_pack_id TEXT UNIQUE,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS module_items (
+                id TEXT PRIMARY KEY,
+                module_id TEXT NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
+                item_key TEXT NOT NULL,
+                name TEXT NOT NULL,
+                group_name TEXT,
+                quantity INTEGER NOT NULL DEFAULT 1,
+                unit TEXT,
+                note TEXT,
+                position INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(module_id, item_key)
+            );
+            CREATE TABLE IF NOT EXISTS module_variants (
+                id TEXT PRIMARY KEY,
+                module_id TEXT NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
+                label TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(module_id, label)
+            );
+            CREATE TABLE IF NOT EXISTS module_variant_adds (
+                id TEXT PRIMARY KEY,
+                variant_id TEXT NOT NULL REFERENCES module_variants(id) ON DELETE CASCADE,
+                item_key TEXT NOT NULL,
+                name TEXT NOT NULL,
+                group_name TEXT,
+                quantity INTEGER NOT NULL DEFAULT 1,
+                unit TEXT,
+                note TEXT,
+                position INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(variant_id, item_key)
+            );
+            CREATE TABLE IF NOT EXISTS module_variant_removes (
+                variant_id TEXT NOT NULL REFERENCES module_variants(id) ON DELETE CASCADE,
+                item_key TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(variant_id, item_key)
+            );
+            CREATE TABLE IF NOT EXISTS module_includes (
+                id TEXT PRIMARY KEY,
+                module_id TEXT NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
+                included_module_id TEXT NOT NULL REFERENCES modules(id) ON DELETE RESTRICT,
+                position INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(module_id, included_module_id, position)
+            );
+            CREATE TABLE IF NOT EXISTS module_choices (
+                id TEXT PRIMARY KEY,
+                module_id TEXT NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
+                choice_key TEXT NOT NULL,
+                label TEXT NOT NULL,
+                required INTEGER NOT NULL DEFAULT 1,
+                position INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(module_id, choice_key)
+            );
+            CREATE TABLE IF NOT EXISTS module_choice_options (
+                id TEXT PRIMARY KEY,
+                choice_id TEXT NOT NULL REFERENCES module_choices(id) ON DELETE CASCADE,
+                option_key TEXT NOT NULL,
+                name TEXT NOT NULL,
+                group_name TEXT,
+                quantity INTEGER NOT NULL DEFAULT 1,
+                unit TEXT,
+                note TEXT,
+                position INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(choice_id, option_key)
+            );
+            CREATE TABLE IF NOT EXISTS composition_selections (
+                id TEXT PRIMARY KEY,
+                target_type TEXT NOT NULL CHECK (target_type IN ('journey', 'blueprint')),
+                target_id TEXT NOT NULL,
+                module_id TEXT NOT NULL REFERENCES modules(id) ON DELETE RESTRICT,
+                variant TEXT,
+                position INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS composition_selections_target_idx
+                ON composition_selections(target_type, target_id, position);
+            CREATE TABLE IF NOT EXISTS composition_choices (
+                selection_id TEXT NOT NULL REFERENCES composition_selections(id) ON DELETE CASCADE,
+                module_id TEXT NOT NULL REFERENCES modules(id) ON DELETE RESTRICT,
+                choice_key TEXT NOT NULL,
+                option_key TEXT NOT NULL,
+                PRIMARY KEY(selection_id, module_id, choice_key)
+            );
+            CREATE TABLE IF NOT EXISTS composition_exclusions (
+                target_type TEXT NOT NULL CHECK (target_type IN ('journey', 'blueprint')),
+                target_id TEXT NOT NULL,
+                composition_key TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY(target_type, target_id, composition_key)
+            );
+            CREATE TABLE IF NOT EXISTS migration_diagnostics (
+                id TEXT PRIMARY KEY,
+                source_type TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                message TEXT NOT NULL,
+                details TEXT
+            );
             """
         )
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(items)").fetchall()}
+        if "composition_key" not in columns:
+            connection.execute("ALTER TABLE items ADD COLUMN composition_key TEXT")
+        if "source_path" not in columns:
+            connection.execute("ALTER TABLE items ADD COLUMN source_path TEXT")
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS items_composition_idx ON items(target_type, target_id, composition_key)"
+        )
+        cls._migrate_legacy_packs(connection)
 
     @staticmethod
     def _id(prefix: str) -> str:
@@ -169,8 +297,17 @@ class Repository:
 
     @staticmethod
     def _source(row: sqlite3.Row) -> ItemSource:
+        raw_path = row["source_path"] if "source_path" in row.keys() else None
+        try:
+            path = tuple(json.loads(raw_path)) if raw_path else ()
+        except (TypeError, ValueError):
+            path = ()
         return ItemSource(
-            row["source_type"], row["source_id"], row["source_label"], row["source_variant"]
+            row["source_type"],
+            row["source_id"],
+            row["source_label"],
+            row["source_variant"],
+            path,
         )
 
     @classmethod
@@ -229,7 +366,15 @@ class Repository:
         if row is None:
             raise ChecklistError(f"Unknown blueprint id: {blueprint_id}.", code="not_found")
         items = cls._items(connection, "blueprint", blueprint_id)
-        return {"id": row["id"], "name": row["name"], "items": items, "item_count": len(items)}
+        composition = cls._composition_view(connection, "blueprint", blueprint_id)
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "items": items,
+            "item_count": len(items),
+            "extras": [item for item in items if item["source"]["kind"] == "direct"],
+            **composition,
+        }
 
     @classmethod
     def _pack_from_connection(cls, connection: sqlite3.Connection, pack_id: str) -> dict[str, Any]:
@@ -280,6 +425,8 @@ class Repository:
             "items": items,
             "item_count": len(items),
             "remaining_count": sum(not item["packed"] and not item["not_needed"] for item in items),
+            "extras": [item for item in items if item["source"]["kind"] in {"direct", "blueprint"}],
+            **cls._composition_view(connection, "journey", journey_id),
         }
 
     def list_blueprints(self) -> list[dict[str, Any]]:
@@ -302,7 +449,10 @@ class Repository:
             return self._blueprint(connection, blueprint_id)
 
     def create_blueprint(
-        self, name: str, items: list[dict[str, Any]] | None = None
+        self,
+        name: str,
+        items: list[dict[str, Any]] | None = None,
+        module_selections: list[dict[str, Any] | str] | None = None,
     ) -> dict[str, Any]:
         name = self._name(name)
         if items is None:
@@ -325,10 +475,20 @@ class Repository:
                 self._insert_item(
                     connection, "blueprint", blueprint_id, value, position, ItemSource("direct")
                 )
-            return self._blueprint(connection, blueprint_id)
+            self._add_module_selections(
+                connection, "blueprint", blueprint_id, module_selections or []
+            )
+            materialized = self._materialize(connection, "blueprint", blueprint_id)
+            blueprint = self._blueprint(connection, blueprint_id)
+            blueprint["conflicts"] = materialized["conflicts"]
+            return blueprint
 
     def start_journey(
-        self, name: str, context: dict[str, Any] | None = None, blueprint_id: str | None = None
+        self,
+        name: str,
+        context: dict[str, Any] | None = None,
+        blueprint_id: str | None = None,
+        module_selections: list[dict[str, Any] | str] | None = None,
     ) -> dict[str, Any]:
         name = self._name(name)
         context = self._context_values(context or {})
@@ -356,6 +516,7 @@ class Repository:
                 ),
             )
             if blueprint:
+                assert blueprint_id is not None
                 rows = connection.execute(
                     "SELECT * FROM items WHERE target_type = 'blueprint' AND target_id = ? ORDER BY position, created_at",
                     (blueprint_id,),
@@ -375,9 +536,17 @@ class Repository:
                             "not_needed": False,
                         },
                         position,
-                        ItemSource("blueprint", blueprint_id, blueprint["name"]),
+                        self._source(row)
+                        if row["source_type"] == "module"
+                        else ItemSource("blueprint", blueprint_id, blueprint["name"]),
+                        row["composition_key"],
                     )
-            return self._journey(connection, journey_id)
+                self._copy_composition(connection, "blueprint", blueprint_id, "journey", journey_id)
+            self._add_module_selections(connection, "journey", journey_id, module_selections or [])
+            materialized = self._materialize(connection, "journey", journey_id)
+            journey = self._journey(connection, journey_id)
+            journey["conflicts"] = materialized["conflicts"]
+            return journey
 
     @classmethod
     def _context_values(cls, context: dict[str, Any]) -> dict[str, Any]:
@@ -461,14 +630,16 @@ class Repository:
         value: dict[str, Any],
         position: int,
         source: ItemSource,
+        composition_key: str | None = None,
     ) -> str:
         item_id = self._id("item")
         now = self._now()
         connection.execute(
             """INSERT INTO items(
                 id, target_type, target_id, name, group_name, quantity, unit, note, packed, not_needed,
-                source_type, source_id, source_label, source_variant, edited, position, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                source_type, source_id, source_label, source_variant, composition_key, source_path,
+                edited, position, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 item_id,
                 target_type,
@@ -484,6 +655,8 @@ class Repository:
                 source.source_id,
                 source.label,
                 source.variant,
+                composition_key,
+                json.dumps(list(source.path)) if source.path else None,
                 0,
                 position,
                 now,
@@ -581,13 +754,19 @@ class Repository:
             unique_ids = list(dict.fromkeys(item_ids))
             placeholders = ",".join("?" for _ in unique_ids)
             rows = connection.execute(
-                f"SELECT id FROM items WHERE target_type = ? AND target_id = ? AND id IN ({placeholders})",
+                f"SELECT id, composition_key FROM items WHERE target_type = ? AND target_id = ? AND id IN ({placeholders})",
                 (target_type, target_id, *unique_ids),
             ).fetchall()
             found = {row["id"] for row in rows}
             missing = [item_id for item_id in unique_ids if item_id not in found]
             if missing:
                 raise ChecklistError(f"Unknown item id(s): {missing}.", code="not_found")
+            for row in rows:
+                if row["composition_key"]:
+                    connection.execute(
+                        "INSERT OR IGNORE INTO composition_exclusions(target_type, target_id, composition_key, created_at) VALUES (?, ?, ?, ?)",
+                        (target_type, target_id, row["composition_key"], self._now()),
+                    )
             connection.execute(
                 f"DELETE FROM items WHERE target_type = ? AND target_id = ? AND id IN ({placeholders})",
                 (target_type, target_id, *unique_ids),
@@ -685,273 +864,4 @@ class Repository:
                 "journey": self._journey(connection, journey_id),
                 "promoted_item_ids": promoted_ids,
                 "skipped": skipped,
-            }
-
-    def list_packs(self, journey_id: str | None = None) -> dict[str, Any]:
-        with self._connect() as connection:
-            journey = self._journey(connection, journey_id) if journey_id else None
-            rows = connection.execute("SELECT * FROM packs ORDER BY name").fetchall()
-            packs = []
-            for row in rows:
-                common_count = connection.execute(
-                    "SELECT COUNT(*) FROM pack_items WHERE pack_id = ? AND variant IS NULL",
-                    (row["id"],),
-                ).fetchone()[0]
-                variants = [
-                    item[0]
-                    for item in connection.execute(
-                        "SELECT DISTINCT variant FROM pack_items WHERE pack_id = ? AND variant IS NOT NULL ORDER BY variant",
-                        (row["id"],),
-                    ).fetchall()
-                ]
-                packs.append(
-                    {
-                        "id": row["id"],
-                        "name": row["name"],
-                        "description": row["description"],
-                        "common_item_count": common_count,
-                        "variants": variants,
-                    }
-                )
-            result: dict[str, Any] = {"packs": packs}
-            if journey:
-                result["journey"] = {
-                    "id": journey["id"],
-                    "season": journey["context"].get("season"),
-                }
-            return result
-
-    def get_pack(self, pack_id: str) -> dict[str, Any]:
-        with self._connect() as connection:
-            return self._pack_from_connection(connection, pack_id)
-
-    def create_pack(
-        self,
-        name: str,
-        common_items: list[dict[str, Any]],
-        variants: list[dict[str, Any]] | None = None,
-        description: str | None = None,
-    ) -> dict[str, Any]:
-        name = self._name(name)
-        if not isinstance(common_items, list) or len(common_items) > 50:
-            raise ChecklistError("common_items must contain at most 50 entries.")
-        common = [self._pack_item_values(item) for item in common_items]
-        variant_values = self._variant_values(variants or [])
-        description = self._text(description, "description", 500)
-        with self._connect() as connection, connection:
-            pack_id = self._id("pack")
-            try:
-                connection.execute(
-                    "INSERT INTO packs(id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-                    (pack_id, name, description, self._now(), self._now()),
-                )
-            except sqlite3.IntegrityError as exc:
-                raise ChecklistError(
-                    f"A pack named {name!r} already exists.", code="conflict"
-                ) from exc
-            self._insert_pack_items(connection, pack_id, common, variant_values)
-            return self._pack_from_connection(connection, pack_id)
-
-    @classmethod
-    def _variant_values(cls, variants: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-        if len(variants) > 20:
-            raise ChecklistError("variants may contain at most 20 entries.")
-        result: dict[str, list[dict[str, Any]]] = {}
-        for variant in variants:
-            if not isinstance(variant, dict):
-                raise ChecklistError("Each variant must be an object.")
-            label = cls._name(variant.get("label"), "variant label")
-            if label in result:
-                raise ChecklistError(f"Duplicate variant label: {label}.")
-            raw_items = variant.get("items", [])
-            if not isinstance(raw_items, list) or len(raw_items) > 50:
-                raise ChecklistError("Each variant items list must contain at most 50 entries.")
-            result[label] = [cls._pack_item_values(item) for item in raw_items]
-        return result
-
-    @staticmethod
-    def _insert_pack_items(
-        connection: sqlite3.Connection,
-        pack_id: str,
-        common: list[dict[str, Any]],
-        variants: dict[str, list[dict[str, Any]]],
-    ) -> None:
-        position = 0
-        for variant, values in [(None, common), *variants.items()]:
-            for value in values:
-                connection.execute(
-                    """INSERT INTO pack_items(
-                        id, pack_id, variant, name, group_name, quantity, unit, note, position
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        Repository._id("packitem"),
-                        pack_id,
-                        variant,
-                        value["name"],
-                        value.get("group_name"),
-                        value["quantity"],
-                        value.get("unit"),
-                        value.get("note"),
-                        position,
-                    ),
-                )
-                position += 1
-
-    def update_pack(
-        self,
-        pack_id: str,
-        name: str | None = None,
-        description: str | None = None,
-        common_items: list[dict[str, Any]] | None = None,
-        variants: list[dict[str, Any]] | None = None,
-    ) -> dict[str, Any]:
-        with self._connect() as connection, connection:
-            current = connection.execute("SELECT * FROM packs WHERE id = ?", (pack_id,)).fetchone()
-            if current is None:
-                raise ChecklistError(f"Unknown pack id: {pack_id}.", code="not_found")
-            updates: dict[str, Any] = {}
-            if name is not None:
-                updates["name"] = self._name(name)
-            if description is not None:
-                updates["description"] = self._text(description, "description", 500)
-            if updates:
-                updates["updated_at"] = self._now()
-                try:
-                    connection.execute(
-                        f"UPDATE packs SET {', '.join(f'{key} = ?' for key in updates)} WHERE id = ?",
-                        (*updates.values(), pack_id),
-                    )
-                except sqlite3.IntegrityError as exc:
-                    raise ChecklistError(
-                        f"A pack named {name!r} already exists.", code="conflict"
-                    ) from exc
-            if common_items is not None or variants is not None:
-                if common_items is not None and (
-                    not isinstance(common_items, list) or len(common_items) > 50
-                ):
-                    raise ChecklistError("common_items must contain at most 50 entries.")
-                common = (
-                    [self._pack_item_values(item) for item in common_items]
-                    if common_items is not None
-                    else None
-                )
-                variant_values = self._variant_values(variants) if variants is not None else None
-                current_items = connection.execute(
-                    "SELECT * FROM pack_items WHERE pack_id = ? ORDER BY position, id", (pack_id,)
-                ).fetchall()
-                if common is None:
-                    common = [
-                        {
-                            "name": row["name"],
-                            "group_name": row["group_name"],
-                            "quantity": row["quantity"],
-                            "unit": row["unit"],
-                            "note": row["note"],
-                        }
-                        for row in current_items
-                        if row["variant"] is None
-                    ]
-                if variant_values is None:
-                    variant_values = {}
-                    for row in current_items:
-                        if row["variant"] is not None:
-                            variant_values.setdefault(row["variant"], []).append(
-                                {
-                                    "name": row["name"],
-                                    "group_name": row["group_name"],
-                                    "quantity": row["quantity"],
-                                    "unit": row["unit"],
-                                    "note": row["note"],
-                                }
-                            )
-                connection.execute("DELETE FROM pack_items WHERE pack_id = ?", (pack_id,))
-                self._insert_pack_items(connection, pack_id, common, variant_values)
-            return self._pack_from_connection(connection, pack_id)
-
-    def delete_pack(self, pack_id: str) -> dict[str, Any]:
-        with self._connect() as connection, connection:
-            row = connection.execute(
-                "SELECT id, name FROM packs WHERE id = ?", (pack_id,)
-            ).fetchone()
-            if row is None:
-                raise ChecklistError(f"Unknown pack id: {pack_id}.", code="not_found")
-            connection.execute("DELETE FROM packs WHERE id = ?", (pack_id,))
-            return {"deleted_pack_id": pack_id, "name": row["name"]}
-
-    def include_pack(
-        self, target_type: str, target_id: str, pack_id: str, variant: str | None = None
-    ) -> dict[str, Any]:
-        with self._connect() as connection, connection:
-            self._require_target(connection, target_type, target_id)
-            pack = connection.execute("SELECT * FROM packs WHERE id = ?", (pack_id,)).fetchone()
-            if pack is None:
-                raise ChecklistError(f"Unknown pack id: {pack_id}.", code="not_found")
-            variants = [
-                row[0]
-                for row in connection.execute(
-                    "SELECT DISTINCT variant FROM pack_items WHERE pack_id = ? AND variant IS NOT NULL ORDER BY variant",
-                    (pack_id,),
-                ).fetchall()
-            ]
-            if variant is not None and variant not in variants:
-                raise ChecklistError(
-                    f"Unknown variant {variant!r}; choose one of {variants}.",
-                    code="validation_error",
-                    details={"available_variants": variants},
-                )
-            rows = connection.execute(
-                "SELECT * FROM pack_items WHERE pack_id = ? AND (variant IS NULL OR variant = ?) ORDER BY position, id",
-                (pack_id, variant),
-            ).fetchall()
-            existing = {
-                row["name"].casefold(): row
-                for row in connection.execute(
-                    "SELECT * FROM items WHERE target_type = ? AND target_id = ?",
-                    (target_type, target_id),
-                ).fetchall()
-            }
-            conflicts = []
-            added_ids = []
-            position = connection.execute(
-                "SELECT COALESCE(MAX(position) + 1, 0) FROM items WHERE target_type = ? AND target_id = ?",
-                (target_type, target_id),
-            ).fetchone()[0]
-            for offset, row in enumerate(rows):
-                existing_row = existing.get(row["name"].casefold())
-                if existing_row:
-                    conflicts.append(
-                        {
-                            "name": row["name"],
-                            "existing_item_id": existing_row["id"],
-                            "pack_item_id": row["id"],
-                            "reason": "duplicate_name_preserved",
-                            "edited": bool(existing_row["edited"]),
-                        }
-                    )
-                    continue
-                added_ids.append(
-                    self._insert_item(
-                        connection,
-                        target_type,
-                        target_id,
-                        {
-                            "name": row["name"],
-                            "group_name": row["group_name"],
-                            "quantity": row["quantity"],
-                            "unit": row["unit"],
-                            "note": row["note"],
-                            "packed": False,
-                            "not_needed": False,
-                        },
-                        position + offset,
-                        ItemSource("pack", pack_id, pack["name"], variant),
-                    )
-                )
-            return {
-                "target": self._target(connection, target_type, target_id),
-                "pack_id": pack_id,
-                "variant": variant,
-                "available_variants": variants,
-                "added_item_ids": added_ids,
-                "conflicts": conflicts,
             }
