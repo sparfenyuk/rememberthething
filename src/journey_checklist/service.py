@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from .hints import composition_hints, direct_item_hints, include_module_hints, journey_hints
+from .hints import composition_hints, direct_item_hints, journey_hints
 from .models import ChecklistError, result_envelope
 from .repository import Repository
 
@@ -33,7 +33,10 @@ class ChecklistService:
             "Blueprint created.",
             {"blueprint": blueprint},
             next_steps=composition_hints(
-                "blueprint", blueprint["id"], blueprint["unresolved_choices"]
+                "blueprint",
+                blueprint["id"],
+                blueprint["unresolved_choices"],
+                selected_modules=blueprint["selected_modules"],
             ),
             conflicts=blueprint["conflicts"],
         )
@@ -208,28 +211,19 @@ class ChecklistService:
         changed = self.repository.include_module(
             target_type, target_id, module_id, variant, choices, selection_id
         )
-        hints = include_module_hints(
+        hints = composition_hints(
             target_type,
             target_id,
-            module_id,
-            changed["selection_id"],
-            changed["available_variants"],
-            variant,
-        )
-        hints.extend(
-            composition_hints(
-                target_type,
-                target_id,
-                changed["unresolved_choices"],
-                conflicts=changed["conflicts"],
-            )
+            changed["unresolved_choices"],
+            selected_modules=changed["target"]["selected_modules"],
+            conflicts=changed["conflicts"],
         )
         return result_envelope(
             "Module included."
             if not changed["conflicts"]
             else "Module included with conflicts preserved.",
             changed,
-            next_steps=hints[:3],
+            next_steps=hints,
             conflicts=changed["conflicts"],
         )
 
@@ -251,6 +245,7 @@ class ChecklistService:
                 target_type,
                 target_id,
                 changed["unresolved_choices"],
+                selected_modules=changed["target"]["selected_modules"],
                 conflicts=changed["conflicts"],
             ),
             conflicts=changed["conflicts"],
@@ -265,6 +260,7 @@ class ChecklistService:
                 target_type,
                 target_id,
                 changed["unresolved_choices"],
+                selected_modules=changed["target"]["selected_modules"],
                 conflicts=changed["conflicts"],
             ),
             conflicts=changed["conflicts"],

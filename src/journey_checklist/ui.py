@@ -104,9 +104,12 @@ CHECKLIST_HTML = r"""<!doctype html>
     if (!selected.length && !unresolved.length && !conflicts.length) return;
     const section = $('hints-section'); section.hidden = false;
     const modules = selected.length ? `<div class="hint"><p><strong>Modules in this checklist</strong><br>${selected.map((module) => `${escapeHtml(module.name)}${module.variant ? ` · ${escapeHtml(module.variant)}` : ''}`).join(' · ')}</p></div>` : '';
+    const variants = selected.flatMap((module) => module.variant ? [] : (module.available_variants || []).map((variant) => `<button data-variant-selection="${escapeHtml(module.selection_id)}" data-module="${escapeHtml(module.module_id)}" data-variant="${escapeHtml(variant)}">${escapeHtml(module.name)} · ${escapeHtml(variant)}</button>`));
+    const variantChoices = variants.length ? `<div class="hint"><p><strong>Choose a module variant</strong></p><span class="actions">${variants.join('')}</span></div>` : '';
     const choices = unresolved.map((choice) => `<div class="hint"><p><strong>${escapeHtml(choice.label)}</strong><br>${escapeHtml(choice.module_name)} · choose one</p><span class="actions">${choice.options.map((option) => `<button data-choice="${escapeHtml(choice.choice_id)}" data-option="${escapeHtml(option.option_key)}" data-selection="${escapeHtml(choice.selection_id)}">${escapeHtml(option.name)}</button>`).join('')}</span></div>`).join('');
     const refresh = conflicts.length ? '<div class="hint"><p>Conflicts preserved; review the current checklist.</p><button data-refresh>Refresh</button></div>' : '';
-    $('hints').innerHTML = modules + choices + refresh;
+    $('hints').innerHTML = modules + variantChoices + choices + refresh;
+    $('hints').querySelectorAll('[data-variant-selection]').forEach((button) => button.addEventListener('click', () => mutate('include_module', {target_type:'journey', target_id:journey.id, module_id:button.dataset.module, variant:button.dataset.variant, selection_id:button.dataset.variantSelection})));
     $('hints').querySelectorAll('[data-choice]').forEach((button) => button.addEventListener('click', () => mutate('select_module_option', {target_type:'journey', target_id:journey.id, selection_id:button.dataset.selection, choice_id:button.dataset.choice, option_key:button.dataset.option})));
     $('hints').querySelector('[data-refresh]')?.addEventListener('click', () => mutate('refresh_composition', {target_type:'journey', target_id:journey.id}));
   }

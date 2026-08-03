@@ -62,6 +62,30 @@ def test_initial_composition_hints_expose_choice_selection(tmp_path):
     assert journey["next_steps"][0]["tool"] == "select_module_option"
 
 
+def test_initial_composition_hints_update_selected_variant(tmp_path):
+    service = ChecklistService(Repository(tmp_path / "initial-variant-hints.sqlite3"))
+    module = service.repository.create_module(
+        "Packing",
+        [{"item_key": "base", "name": "Base"}],
+        variants=[{"label": "alt", "add": [{"item_key": "extra", "name": "Extra"}]}],
+    )
+
+    blueprint = service.create_blueprint("Trip", module_selections=[module["id"]])
+    journey = service.start_journey("Trip", module_selections=[module["id"]])
+
+    for result, target_name in ((blueprint, "blueprint"), (journey, "journey")):
+        target = result["affected"][target_name]
+        hint = result["next_steps"][0]
+        assert hint["tool"] == "include_module"
+        assert hint["arguments"] == {
+            "target_type": target_name,
+            "target_id": target["id"],
+            "module_id": module["id"],
+            "selection_id": target["selected_modules"][0]["selection_id"],
+        }
+        assert hint["needs"] == ["variant"]
+
+
 def test_creation_conflicts_are_returned_for_blueprints_and_journeys(tmp_path):
     service = ChecklistService(Repository(tmp_path / "creation-conflicts.sqlite3"))
     module = service.repository.create_module(

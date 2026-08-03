@@ -52,6 +52,13 @@ class CompositionRepositoryMixin:
         ).fetchall()
         selected = []
         for row in selections:
+            available_variants = [
+                variant["label"]
+                for variant in connection.execute(
+                    "SELECT label FROM module_variants WHERE module_id = ? ORDER BY position, id",
+                    (row["module_id"],),
+                ).fetchall()
+            ]
             choices = [
                 {
                     "module_id": choice["module_id"],
@@ -70,6 +77,7 @@ class CompositionRepositoryMixin:
                     "module_id": row["module_id"],
                     "name": row["module_name"],
                     "variant": row["variant"],
+                    "available_variants": available_variants,
                     "position": row["position"],
                     "choices": choices,
                 }

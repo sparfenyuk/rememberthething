@@ -21,8 +21,14 @@ def _hint(
 
 
 def journey_hints(journey: dict[str, Any], modules: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    if journey.get("unresolved_choices"):
-        return composition_hints("journey", journey["id"], journey["unresolved_choices"])
+    composition = composition_hints(
+        "journey",
+        journey["id"],
+        journey["unresolved_choices"],
+        selected_modules=journey.get("selected_modules"),
+    )
+    if composition:
+        return composition
     if any(item["source"]["kind"] == "module" for item in journey["items"]):
         return []
     if not modules:
@@ -124,23 +130,38 @@ def composition_hints(
     target_id: str,
     unresolved_choices: list[dict[str, Any]],
     *,
+    selected_modules: list[dict[str, Any]] | None = None,
     conflicts: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     hints = [
-        _hint(
-            "select_module_option",
-            f"Resolve the {choice['label']} choice explicitly.",
-            {
-                "target_type": target_type,
-                "target_id": target_id,
-                "selection_id": choice["selection_id"],
-                "choice_id": choice["choice_id"],
-            },
-            needs=["option_key"],
-            confirmation=True,
+        hint
+        for module in selected_modules or []
+        for hint in include_module_hints(
+            target_type,
+            target_id,
+            module["module_id"],
+            module["selection_id"],
+            module.get("available_variants", []),
+            module.get("variant"),
         )
-        for choice in unresolved_choices
     ]
+    hints.extend(
+        [
+            _hint(
+                "select_module_option",
+                f"Resolve the {choice['label']} choice explicitly.",
+                {
+                    "target_type": target_type,
+                    "target_id": target_id,
+                    "selection_id": choice["selection_id"],
+                    "choice_id": choice["choice_id"],
+                },
+                needs=["option_key"],
+                confirmation=True,
+            )
+            for choice in unresolved_choices
+        ]
+    )
     if conflicts:
         hints.append(
             _hint(
