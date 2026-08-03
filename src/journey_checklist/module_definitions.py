@@ -145,7 +145,13 @@ class ModuleDefinitionMixin:
         return values
 
     @classmethod
-    def _normalize_variants(cls, raw_variants: Any, common_keys: set[str]) -> list[dict[str, Any]]:
+    def _normalize_variants(
+        cls,
+        raw_variants: Any,
+        common_keys: set[str],
+        *,
+        allow_missing_key: bool = True,
+    ) -> list[dict[str, Any]]:
         if raw_variants is None:
             return []
         if not isinstance(raw_variants, list) or len(raw_variants) > 20:
@@ -160,7 +166,9 @@ class ModuleDefinitionMixin:
                 raise ChecklistError(f"Duplicate variant label: {label}.")
             labels.add(label)
             add = cls._normalize_module_items(
-                raw.get("add", raw.get("items", [])), field=f"variant {label} add"
+                raw.get("add", raw.get("items", [])),
+                field=f"variant {label} add",
+                allow_missing_key=allow_missing_key,
             )
             add_keys = {item["item_key"] for item in add}
             if common_keys & add_keys:

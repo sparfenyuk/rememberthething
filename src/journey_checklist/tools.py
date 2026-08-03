@@ -200,10 +200,13 @@ def register_tools(mcp: FastMCP, service: ChecklistService) -> None:
         module_id: str,
         variant: str | None = None,
         choices: dict[str, str] | list[dict[str, Any]] | None = None,
+        selection_id: str | None = None,
     ) -> ToolResult:
         """Select and materialize one module into a journey or blueprint."""
         return _result(
-            lambda: service.include_module(target_type, target_id, module_id, variant, choices)
+            lambda: service.include_module(
+                target_type, target_id, module_id, variant, choices, selection_id
+            )
         )
 
     @_tool(mcp)

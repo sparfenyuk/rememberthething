@@ -132,6 +132,16 @@ def test_refresh_updates_name_index_before_next_source_key(tmp_path):
     assert [item["name"] for item in refreshed["target"]["items"]] == ["Same", "Second"]
 
 
+def test_module_update_requires_stable_item_keys(tmp_path):
+    repository = Repository(tmp_path / "stable-keys.sqlite3")
+    module = repository.create_module("Work", [{"item_key": "old-key", "name": "Old"}])
+
+    with pytest.raises(ChecklistError, match="requires item_key"):
+        repository.update_module(module["id"], common_items=[{"name": "Renamed"}])
+
+    assert repository.get_module(module["id"])["items"][0]["item_key"] == "old-key"
+
+
 def test_module_update_rejects_invalidating_selected_variant(tmp_path):
     repository = Repository(tmp_path / "stale-selection.sqlite3")
     module = repository.create_module(
@@ -175,6 +185,38 @@ def test_one_of_is_unresolved_until_selected(tmp_path):
     )
     assert [item["name"] for item in selected["target"]["items"]] == ["35mm"]
     assert selected["target"]["unresolved_choices"] == []
+
+
+def test_switching_an_edited_choice_is_rejected(tmp_path):
+    repository = Repository(tmp_path / "edited-choice.sqlite3")
+    module = repository.create_module(
+        "Video",
+        choices=[
+            {
+                "choice_key": "lens",
+                "label": "Lens",
+                "options": [
+                    {"option_key": "prime", "name": "35mm"},
+                    {"option_key": "zoom", "name": "24-70"},
+                ],
+            }
+        ],
+    )
+    journey = repository.start_journey("Trip")
+    included = repository.include_module("journey", journey["id"], module["id"])
+    selected = repository.select_module_option(
+        "journey", journey["id"], "lens", "prime", included["selection_id"]
+    )
+    repository.update_items(
+        "journey", journey["id"], [{"item_id": selected["target"]["items"][0]["id"], "note": "keep"}]
+    )
+
+    with pytest.raises(ChecklistError, match="editing its selected item"):
+        repository.select_module_option(
+            "journey", journey["id"], "lens", "zoom", included["selection_id"]
+        )
+
+    assert [item["name"] for item in repository.get_journey(journey["id"])["items"]] == ["35mm"]
 
 
 def test_nested_choice_can_be_included_and_selected(tmp_path):

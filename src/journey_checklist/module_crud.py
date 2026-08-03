@@ -30,7 +30,11 @@ class ModuleCrudMixin:
 
         @classmethod
         def _normalize_variants(
-            cls, raw_variants: Any, common_keys: set[str]
+            cls,
+            raw_variants: Any,
+            common_keys: set[str],
+            *,
+            allow_missing_key: bool = True,
         ) -> list[dict[str, Any]]: ...
 
         @classmethod
@@ -222,14 +226,18 @@ class ModuleCrudMixin:
         with self._connect() as connection, connection:
             current = self._module_from_connection(connection, module_id)
             common = (
-                self._normalize_module_items(common_items, field="common_items")
+                self._normalize_module_items(
+                    common_items, field="common_items", allow_missing_key=False
+                )
                 if common_items is not None
                 else [dict(item, item_key=item["item_key"]) for item in current["items"]]
             )
             common_keys = {item["item_key"] for item in common}
             old_variants = current["variants"]
             variant_values = self._normalize_variants(
-                variants if variants is not None else old_variants, common_keys
+                variants if variants is not None else old_variants,
+                common_keys,
+                allow_missing_key=False,
             )
             choice_values = self._normalize_choices(
                 choices if choices is not None else current["choices"]

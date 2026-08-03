@@ -78,7 +78,7 @@ def test_creation_conflicts_are_returned_for_blueprints_and_journeys(tmp_path):
     assert journey["conflicts"][0]["reason"] == "duplicate_name_preserved"
 
 
-def test_include_module_does_not_hint_a_second_variant_selection(tmp_path):
+def test_include_module_variant_hint_updates_existing_selection(tmp_path):
     service = ChecklistService(Repository(tmp_path / "variant-hints.sqlite3"))
     module = service.repository.create_module(
         "Packing",
@@ -88,4 +88,21 @@ def test_include_module_does_not_hint_a_second_variant_selection(tmp_path):
     journey = service.start_journey("Trip")["affected"]["journey"]
 
     included = service.include_module("journey", journey["id"], module["id"])
-    assert included["next_steps"] == []
+    hint = included["next_steps"][0]
+    assert hint["tool"] == "include_module"
+    assert hint["arguments"]["selection_id"] == included["affected"]["selection_id"]
+
+    updated = service.include_module(
+        "journey",
+        journey["id"],
+        module["id"],
+        variant="alt",
+        selection_id=hint["arguments"]["selection_id"],
+    )
+    assert updated.get("conflicts", []) == []
+    assert [item["name"] for item in updated["affected"]["target"]["items"]] == [
+        "Base",
+        "Extra",
+    ]
+    assert updated["affected"]["target"]["items"][0]["source"]["variant"] == "alt"
+    assert len(updated["affected"]["target"]["selected_modules"]) == 1

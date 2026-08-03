@@ -203,12 +203,18 @@ class ChecklistService:
         module_id: str,
         variant: str | None = None,
         choices: Any = None,
+        selection_id: str | None = None,
     ) -> dict[str, Any]:
         changed = self.repository.include_module(
-            target_type, target_id, module_id, variant, choices
+            target_type, target_id, module_id, variant, choices, selection_id
         )
         hints = include_module_hints(
-            target_type, target_id, module_id, changed["available_variants"], variant
+            target_type,
+            target_id,
+            module_id,
+            changed["selection_id"],
+            changed["available_variants"],
+            variant,
         )
         hints.extend(
             composition_hints(

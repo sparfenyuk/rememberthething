@@ -97,10 +97,26 @@ def include_module_hints(
     target_type: str,
     target_id: str,
     module_id: str,
+    selection_id: str,
     available_variants: list[str],
     variant: str | None,
 ) -> list[dict[str, Any]]:
-    return []
+    if variant is not None or not available_variants:
+        return []
+    return [
+        _hint(
+            "include_module",
+            "Choose a variant for this existing module selection.",
+            {
+                "target_type": target_type,
+                "target_id": target_id,
+                "module_id": module_id,
+                "selection_id": selection_id,
+            },
+            needs=["variant"],
+            confirmation=True,
+        )
+    ]
 
 
 def composition_hints(

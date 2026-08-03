@@ -309,9 +309,19 @@ class MaterializationMixin:
                         }
                     )
                     continue
+                source_path = json.dumps(list(candidate["source"].path))
                 changed = any(
                     existing[field] != candidate.get(field)
                     for field in ("name", "group_name", "quantity", "unit", "note")
+                ) or any(
+                    existing[field] != value
+                    for field, value in (
+                        ("source_type", candidate["source"].kind),
+                        ("source_id", candidate["source"].source_id),
+                        ("source_label", candidate["source"].label),
+                        ("source_variant", candidate["source"].variant),
+                        ("source_path", source_path),
+                    )
                 )
                 if changed and existing["edited"]:
                     conflicts.append(
@@ -338,7 +348,7 @@ class MaterializationMixin:
                             candidate["source"].source_id,
                             candidate["source"].label,
                             candidate["source"].variant,
-                            json.dumps(list(candidate["source"].path)),
+                            source_path,
                             self._now(),
                             existing["id"],
                         ),
@@ -391,19 +401,70 @@ class MaterializationMixin:
         module_id: str,
         variant: str | None = None,
         choices: Any = None,
+        selection_id: str | None = None,
     ) -> dict[str, Any]:
         with self._connect() as connection, connection:
             self._require_target(connection, target_type, target_id)
             module = self._module_from_connection(connection, module_id)
-            selection_ids = self._add_module_selections(
-                connection,
-                target_type,
-                target_id,
-                [{"module_id": module_id, "variant": variant, "choices": choices}],
-            )
+            conflicts: list[dict[str, Any]] = []
+            if selection_id is None:
+                selection_id = self._add_module_selections(
+                    connection,
+                    target_type,
+                    target_id,
+                    [{"module_id": module_id, "variant": variant, "choices": choices}],
+                )[0]
+            else:
+                selection = connection.execute(
+                    "SELECT * FROM composition_selections "
+                    "WHERE id = ? AND target_type = ? AND target_id = ?",
+                    (selection_id, target_type, target_id),
+                ).fetchone()
+                if selection is None:
+                    raise ChecklistError(
+                        f"Unknown selection id: {selection_id}.", code="not_found"
+                    )
+                if selection["module_id"] != module_id:
+                    raise ChecklistError(
+                        "Selection does not belong to the requested module.", code="conflict"
+                    )
+                if choices is not None:
+                    raise ChecklistError(
+                        "Choices cannot be changed while updating a module selection."
+                    )
+                old_resolved, _ = self._resolve_target(connection, target_type, target_id)
+                old_keys = {
+                    item["composition_key"]
+                    for item in old_resolved
+                    if item["selection_id"] == selection_id
+                }
+                connection.execute(
+                    "UPDATE composition_selections SET variant = ? WHERE id = ?",
+                    (variant, selection_id),
+                )
+                resolved, _ = self._resolve_target(connection, target_type, target_id)
+                active_keys = {item["composition_key"] for item in resolved}
+                stale_keys = old_keys - active_keys
+                if stale_keys:
+                    rows = connection.execute(
+                        "SELECT id, composition_key, edited FROM items "
+                        "WHERE target_type = ? AND target_id = ? AND composition_key IN "
+                        f"({', '.join('?' for _ in stale_keys)})",
+                        (target_type, target_id, *stale_keys),
+                    ).fetchall()
+                    for row in rows:
+                        if row["edited"]:
+                            conflicts.append(
+                                {
+                                    "existing_item_id": row["id"],
+                                    "reason": "edited_previous_variant_preserved",
+                                }
+                            )
+                        else:
+                            connection.execute("DELETE FROM items WHERE id = ?", (row["id"],))
             resolved, _ = self._resolve_target(connection, target_type, target_id)
             for item in resolved:
-                if item["selection_id"] == selection_ids[0]:
+                if item["selection_id"] == selection_id:
                     connection.execute(
                         "DELETE FROM composition_exclusions "
                         "WHERE target_type = ? AND target_id = ? AND composition_key = ?",
@@ -414,11 +475,12 @@ class MaterializationMixin:
                 {
                     "module_id": module_id,
                     "module": module,
-                    "selection_id": selection_ids[0],
+                    "selection_id": selection_id,
                     "variant": variant,
                     "available_variants": [item["label"] for item in module["variants"]],
                 }
             )
+            result["conflicts"] = [*conflicts, *result["conflicts"]]
             return result
 
     def refresh_composition(self, target_type: str, target_id: str) -> dict[str, Any]:
@@ -473,23 +535,29 @@ class MaterializationMixin:
                 "WHERE selection_id = ? AND module_id = ? AND choice_key = ?",
                 (selection_id, choice_module_id, canonical_choice),
             ).fetchone()
-            conflicts = []
             if old and old["option_key"] != canonical_option:
                 prefix = f"module:{choice_module_id}:choice:{canonical_choice}:"
+                edited = [
+                    row["id"]
+                    for row in connection.execute(
+                        "SELECT id, edited FROM items "
+                        "WHERE target_type = ? AND target_id = ? AND composition_key LIKE ?",
+                        (target_type, target_id, f"{prefix}%"),
+                    ).fetchall()
+                    if row["edited"]
+                ]
+                if edited:
+                    raise ChecklistError(
+                        "Cannot change a one-of choice after editing its selected item.",
+                        code="conflict",
+                        details={"existing_item_ids": edited},
+                    )
                 for row in connection.execute(
-                    "SELECT id, edited FROM items "
+                    "SELECT id FROM items "
                     "WHERE target_type = ? AND target_id = ? AND composition_key LIKE ?",
                     (target_type, target_id, f"{prefix}%"),
                 ).fetchall():
-                    if row["edited"]:
-                        conflicts.append(
-                            {
-                                "existing_item_id": row["id"],
-                                "reason": "edited_previous_choice_preserved",
-                            }
-                        )
-                    else:
-                        connection.execute("DELETE FROM items WHERE id = ?", (row["id"],))
+                    connection.execute("DELETE FROM items WHERE id = ?", (row["id"],))
             connection.execute(
                 "DELETE FROM composition_choices "
                 "WHERE selection_id = ? AND module_id = ? AND choice_key = ?",
@@ -508,5 +576,4 @@ class MaterializationMixin:
                     "option_key": canonical_option,
                 }
             )
-            result["conflicts"] = [*conflicts, *result["conflicts"]]
             return result
