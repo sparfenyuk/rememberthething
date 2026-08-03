@@ -99,9 +99,7 @@ def test_refresh_reports_duplicate_name_when_source_key_exists(tmp_path):
     journey = repository.start_journey("Trip")
     repository.add_items("journey", journey["id"], [{"name": "Umbrella"}])
     repository.include_module("journey", journey["id"], module["id"])
-    repository.update_module(
-        module["id"], common_items=[{"item_key": "coat", "name": "Umbrella"}]
-    )
+    repository.update_module(module["id"], common_items=[{"item_key": "coat", "name": "Umbrella"}])
 
     refreshed = repository.refresh_composition("journey", journey["id"])
     assert refreshed["conflicts"][0]["reason"] == "duplicate_name_preserved"
@@ -208,7 +206,9 @@ def test_switching_an_edited_choice_is_rejected(tmp_path):
         "journey", journey["id"], "lens", "prime", included["selection_id"]
     )
     repository.update_items(
-        "journey", journey["id"], [{"item_id": selected["target"]["items"][0]["id"], "note": "keep"}]
+        "journey",
+        journey["id"],
+        [{"item_id": selected["target"]["items"][0]["id"], "note": "keep"}],
     )
 
     with pytest.raises(ChecklistError, match="editing its selected item"):
@@ -283,9 +283,7 @@ def test_legacy_migration_separates_common_and_variant_keys(tmp_path):
     module = migrated.get_module(migrated.list_modules()[0]["id"])
     assert module["variants"][0]["add"][0]["item_key"] == "a-b-2"
     journey = migrated.start_journey("Trip")
-    included = migrated.include_module(
-        "journey", journey["id"], module["id"], variant="variant"
-    )
+    included = migrated.include_module("journey", journey["id"], module["id"], variant="variant")
     assert [item["name"] for item in included["target"]["items"]] == ["a/b"]
 
 
@@ -303,9 +301,9 @@ def test_legacy_migration_renames_conflicting_module_and_is_idempotent(tmp_path)
         first_count = connection.execute("SELECT COUNT(*) FROM migration_diagnostics").fetchone()[0]
     Repository(path).list_modules()
     with sqlite3.connect(path) as connection:
-        second_count = connection.execute(
-            "SELECT COUNT(*) FROM migration_diagnostics"
-        ).fetchone()[0]
+        second_count = connection.execute("SELECT COUNT(*) FROM migration_diagnostics").fetchone()[
+            0
+        ]
     assert first_count == second_count == 1
 
 

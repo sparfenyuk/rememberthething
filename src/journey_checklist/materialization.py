@@ -421,9 +421,7 @@ class MaterializationMixin:
                     (selection_id, target_type, target_id),
                 ).fetchone()
                 if selection is None:
-                    raise ChecklistError(
-                        f"Unknown selection id: {selection_id}.", code="not_found"
-                    )
+                    raise ChecklistError(f"Unknown selection id: {selection_id}.", code="not_found")
                 if selection["module_id"] != module_id:
                     raise ChecklistError(
                         "Selection does not belong to the requested module.", code="conflict"

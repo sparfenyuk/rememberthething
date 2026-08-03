@@ -541,9 +541,7 @@ class Repository(
                         else ItemSource("blueprint", blueprint_id, blueprint["name"]),
                         row["composition_key"],
                     )
-                self._copy_composition(
-                    connection, "blueprint", blueprint_id, "journey", journey_id
-                )
+                self._copy_composition(connection, "blueprint", blueprint_id, "journey", journey_id)
             self._add_module_selections(connection, "journey", journey_id, module_selections or [])
             materialized = self._materialize(connection, "journey", journey_id)
             journey = self._journey(connection, journey_id)

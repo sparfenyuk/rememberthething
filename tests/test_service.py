@@ -115,9 +115,7 @@ def test_current_composition_hint_precedes_older_variant_suggestions(tmp_path):
         == selected_choice["affected"]["selection_id"]
     )
 
-    variants = service.repository.create_module(
-        "Current", variants=[{"label": "alt", "add": []}]
-    )
+    variants = service.repository.create_module("Current", variants=[{"label": "alt", "add": []}])
     selected_variant = service.include_module("journey", journey["id"], variants["id"])
     assert selected_variant["next_steps"][0]["tool"] == "include_module"
     assert (
@@ -134,9 +132,7 @@ def test_creation_conflicts_are_returned_for_blueprints_and_journeys(tmp_path):
         "Packing", [{"item_key": "passport", "name": "Passport"}]
     )
 
-    blueprint = service.create_blueprint(
-        "Trip", [{"name": "Passport"}], [module["id"]]
-    )
+    blueprint = service.create_blueprint("Trip", [{"name": "Passport"}], [module["id"]])
     assert blueprint["conflicts"][0]["reason"] == "duplicate_name_preserved"
     blueprint_id = blueprint["affected"]["blueprint"]["id"]
 

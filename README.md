@@ -38,7 +38,7 @@ The tools are target-explicit: journeys and blueprints own concrete materialized
 }
 ```
 
-Every tool advertises a generated output schema for this envelope. `affected` contains the operation-specific payload, including selected modules, source paths, unresolved choices, and conflicts; rejected operations include `error` without changing the text content or `isError` signal.
+Every tool advertises a generated output schema for this envelope. `affected` contains the operation-specific payload, including selected modules, source paths, unresolved choices, and conflicts; rejected operations include `error` in the text content and set the MCP `isError` signal.
 
 Existing SQLite pack tables remain as read-only migration input. Startup converts each pack to a module with deterministic stable keys and variant deltas, preserving existing checklist rows and provenance where possible. Name conflicts receive deterministic suffixed module names and one migration diagnostic. Migration is idempotent. New clients should use the module tools; conditions, computed quantities, tags/search, and persistent inventory are intentionally deferred.
 
