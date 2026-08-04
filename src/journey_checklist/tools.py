@@ -76,6 +76,10 @@ class OptionInput(_InputModel):
     note: str | None = None
 
 
+class UpdateOptionInput(OptionInput):
+    option_key: str = Field(validation_alias=AliasChoices("option_key", "item_key", "key"))
+
+
 class VariantRemoveInput(_InputModel):
     item_key: str = Field(validation_alias=AliasChoices("item_key", "key"))
 
@@ -103,6 +107,10 @@ class ModuleChoiceInput(_InputModel):
     label: str | None = None
     required: bool = True
     options: list[OptionInput] = Field(min_length=1, max_length=50)
+
+
+class UpdateModuleChoiceInput(ModuleChoiceInput):
+    options: list[UpdateOptionInput] = Field(min_length=1, max_length=50)
 
 
 class ModuleIncludeInput(_InputModel):
@@ -305,7 +313,7 @@ def register_tools(mcp: FastMCP, service: ChecklistService) -> None:
         common_items: list[StableModuleItemInput] | None = None,
         variants: list[StableModuleVariantInput] | None = None,
         includes: list[ModuleIncludeInput | str] | None = None,
-        choices: list[ModuleChoiceInput] | None = None,
+        choices: list[UpdateModuleChoiceInput] | None = None,
     ) -> ToolResult:
         """Update module definitions without rewriting existing materialized targets."""
         return _result(

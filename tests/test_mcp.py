@@ -138,6 +138,9 @@ async def test_composable_tools_advertise_typed_nested_input_schemas(tmp_path, m
                     update_schema = schemas["update_module"]
                     update_item = array_items(update_schema, "common_items")
                     assert "item_key" in update_item["required"]
+                    update_choice = array_items(update_schema, "choices")
+                    update_option = update_choice["properties"]["options"]["items"]
+                    assert "option_key" in update_option["required"]
 
                     blueprint_item = array_items(schemas["create_blueprint"], "items")
                     assert {
