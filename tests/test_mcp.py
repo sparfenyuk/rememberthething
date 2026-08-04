@@ -91,6 +91,89 @@ async def test_all_tools_advertise_valid_output_schemas_and_keep_ui_metadata(tmp
 
 
 @pytest.mark.asyncio
+async def test_composable_tools_advertise_typed_nested_input_schemas(tmp_path, monkeypatch):
+    monkeypatch.setenv("JOURNEY_CHECKLIST_DB", str(tmp_path / "input-schemas.sqlite3"))
+    monkeypatch.delenv("LMSTASH_ORIGIN_TOKEN", raising=False)
+    from src.server import create_app
+
+    app = create_app(tmp_path / "input-schemas.sqlite3")
+    transport = httpx.ASGITransport(app=app)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            async with streamable_http_client(
+                "http://testserver/mcp", http_client=client
+            ) as streams:
+                async with ClientSession(streams[0], streams[1]) as session:
+                    await session.initialize()
+                    schemas = {
+                        tool.name: tool.inputSchema for tool in (await session.list_tools()).tools
+                    }
+
+                    def array_items(schema: dict[str, object], field: str) -> dict[str, object]:
+                        variants = schema["properties"][field]["anyOf"]
+                        return next(
+                            item["items"] for item in variants if item.get("type") == "array"
+                        )
+
+                    module_schema = schemas["create_module"]
+                    common_item = array_items(module_schema, "common_items")
+                    assert {"item_key", "name", "group", "quantity", "unit", "note"} <= set(
+                        common_item["properties"]
+                    )
+                    choice = array_items(module_schema, "choices")
+                    assert {"choice_key", "label", "required", "options"} <= set(
+                        choice["properties"]
+                    )
+                    option = choice["properties"]["options"]["items"]
+                    assert {"option_key", "name", "group", "quantity", "unit", "note"} <= set(
+                        option["properties"]
+                    )
+                    assert "options" in choice["required"]
+                    assert choice["properties"]["options"]["minItems"] == 1
+                    assert choice["properties"]["options"]["maxItems"] == 50
+                    variant = array_items(module_schema, "variants")
+                    assert {"add", "remove"} <= set(variant["properties"])
+                    assert "item_key" in variant["properties"]["add"]["items"]["properties"]
+
+                    update_schema = schemas["update_module"]
+                    update_item = array_items(update_schema, "common_items")
+                    assert "item_key" in update_item["required"]
+
+                    blueprint_item = array_items(schemas["create_blueprint"], "items")
+                    assert {
+                        "name",
+                        "group",
+                        "quantity",
+                        "unit",
+                        "note",
+                        "packed",
+                        "not_needed",
+                    } <= set(blueprint_item["properties"])
+                    assert "item_key" not in blueprint_item["properties"]
+                    context = schemas["start_journey"]["properties"]["context"]["anyOf"][0]
+                    assert {
+                        "destination",
+                        "purpose",
+                        "start_date",
+                        "end_date",
+                        "duration_days",
+                        "season",
+                    } <= set(context["properties"])
+
+                    include_choices = schemas["include_module"]["properties"]["choices"]["anyOf"]
+                    choice_selection = next(
+                        item["items"] for item in include_choices if item.get("type") == "array"
+                    )
+                    assert {"choice_key", "option_key", "module_id"} <= set(
+                        choice_selection["properties"]
+                    )
+                    assert all(
+                        schema.get("additionalProperties") is False
+                        for schema in (common_item, choice, option, variant, choice_selection)
+                    )
+
+
+@pytest.mark.asyncio
 async def test_success_and_error_envelopes_validate_across_tool_families(tmp_path, monkeypatch):
     monkeypatch.setenv("JOURNEY_CHECKLIST_DB", str(tmp_path / "result-schemas.sqlite3"))
     monkeypatch.delenv("LMSTASH_ORIGIN_TOKEN", raising=False)
@@ -239,6 +322,83 @@ async def test_mcp_choice_follow_up_is_structured_and_tool_only(tmp_path, monkey
                         .text
                     )
                     assert selected["affected"]["target"]["items"][0]["name"] == "35mm"
+
+
+@pytest.mark.asyncio
+async def test_mcp_nested_choice_selection_accepts_typed_inputs(tmp_path, monkeypatch):
+    monkeypatch.setenv("JOURNEY_CHECKLIST_DB", str(tmp_path / "nested-choice-inputs.sqlite3"))
+    monkeypatch.delenv("LMSTASH_ORIGIN_TOKEN", raising=False)
+    from src.server import create_app
+
+    app = create_app(tmp_path / "nested-choice-inputs.sqlite3")
+    transport = httpx.ASGITransport(app=app)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            async with streamable_http_client(
+                "http://testserver/mcp", http_client=client
+            ) as streams:
+                async with ClientSession(streams[0], streams[1]) as session:
+                    await session.initialize()
+                    child = json.loads(
+                        (
+                            await session.call_tool(
+                                "create_module",
+                                {
+                                    "name": "Video",
+                                    "choices": [
+                                        {
+                                            "choice_key": "lens",
+                                            "label": "Lens",
+                                            "options": [{"option_key": "prime", "name": "35mm"}],
+                                        }
+                                    ],
+                                },
+                            )
+                        )
+                        .content[0]
+                        .text
+                    )["affected"]["module"]
+                    parent = json.loads(
+                        (
+                            await session.call_tool(
+                                "create_module",
+                                {
+                                    "name": "Camera kit",
+                                    "includes": [{"module_id": child["id"]}],
+                                },
+                            )
+                        )
+                        .content[0]
+                        .text
+                    )["affected"]["module"]
+                    journey = json.loads(
+                        (
+                            await session.call_tool(
+                                "start_journey",
+                                {
+                                    "name": "Trip",
+                                    "context": {"destination": "Berlin", "duration_days": 3},
+                                    "module_selections": [
+                                        {
+                                            "module_id": parent["id"],
+                                            "choices": [
+                                                {
+                                                    "module_id": child["id"],
+                                                    "choice_key": "lens",
+                                                    "option_key": "prime",
+                                                }
+                                            ],
+                                        }
+                                    ],
+                                },
+                            )
+                        )
+                        .content[0]
+                        .text
+                    )["affected"]["journey"]
+
+                    assert [item["name"] for item in journey["items"]] == ["35mm"]
+                    assert journey["unresolved_choices"] == []
 
 
 @pytest.mark.asyncio
