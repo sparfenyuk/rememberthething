@@ -87,7 +87,7 @@ For a hosted runtime, set `LMSTASH_ALLOWED_HOSTS` and `LMSTASH_ALLOWED_ORIGINS` 
 
 ## Tool and UI contract
 
-The tools are target-explicit: journeys and blueprints own concrete materialized item rows plus selected module references and direct extras. Modules own stable item keys, nested includes, variant add/remove deltas, and explicit `one_of` choices. `include_module` and `refresh_composition` materialize snapshots; edits and durable removals survive refresh. Pass an existing selection's `selection_id` to `include_module` when applying a variant so the selection is updated instead of duplicated; initial selections with variants expose that same update hint. Module updates require explicit item keys when replacing common or variant-added items. Direct journey items are never promoted implicitly. `next_steps` contains bounded hints with tool names, safe arguments, missing inputs, and confirmation requirements; the current selection takes priority over older suggestions. Hints never trigger a mutation.
+The tools are target-explicit: journeys and blueprints own concrete materialized item rows plus selected module references and direct extras. Modules own stable item keys, nested includes, variant add/remove deltas, and explicit `one_of` choices. `include_module` and `refresh_composition` materialize snapshots; edits and durable removals survive refresh. Pass an existing selection's `selection_id` to `include_module` when applying a variant so the selection is updated instead of duplicated; initial selections with variants expose that same update hint. Module updates require explicit `item_key` values when replacing common or variant-added items, and explicit `option_key` values when replacing choice options. Direct journey items are never promoted implicitly. `next_steps` contains bounded hints with tool names, safe arguments, missing inputs, and confirmation requirements; the current selection takes priority over older suggestions. Hints never trigger a mutation.
 
 `start_journey` and `get_journey` advertise `ui://journey-checklist/checklist.html`. Compatible MCP Apps clients render the same persisted journey as a narrow-width-safe todo surface. Tool-only clients receive the same structured envelope:
 
@@ -100,6 +100,8 @@ The tools are target-explicit: journeys and blueprints own concrete materialized
 ```
 
 Every tool advertises a generated output schema for this envelope. `affected` contains the operation-specific payload, including selected modules, source paths, unresolved choices, and conflicts; rejected operations include `error` in the text content and set the MCP `isError` signal.
+
+For exact MCP arguments, clients should use each tool's generated `inputSchema`. Composable inputs are typed for module items, includes, variants, choices, selections, and journey context; each choice needs at least one option, and object inputs reject unknown fields.
 
 Existing SQLite pack tables remain as read-only migration input. Startup converts each pack to a module with deterministic stable keys and variant deltas, preserving existing checklist rows and provenance where possible. Name conflicts receive deterministic suffixed module names and one migration diagnostic. Migration is idempotent. New clients should use the module tools; conditions, computed quantities, tags/search, and persistent inventory are intentionally deferred.
 

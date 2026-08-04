@@ -102,14 +102,17 @@ class StableModuleVariantInput(_InputModel):
     remove: list[str | VariantRemoveInput] = Field(default_factory=list)
 
 
-class ModuleChoiceInput(_InputModel):
+class _ModuleChoiceInput(_InputModel):
     choice_key: str = Field(validation_alias=AliasChoices("choice_key", "key", "id"))
     label: str | None = None
     required: bool = True
+
+
+class ModuleChoiceInput(_ModuleChoiceInput):
     options: list[OptionInput] = Field(min_length=1, max_length=50)
 
 
-class UpdateModuleChoiceInput(ModuleChoiceInput):
+class UpdateModuleChoiceInput(_ModuleChoiceInput):
     options: list[UpdateOptionInput] = Field(min_length=1, max_length=50)
 
 
