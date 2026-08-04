@@ -8,7 +8,7 @@ from fastmcp import FastMCP
 from fastmcp.apps import AppConfig
 from fastmcp.tools import ToolResult
 from mcp.types import TextContent
-from pydantic import BaseModel, ConfigDict
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from .service import ChecklistService, run_tool
 from .ui import CHECKLIST_HTML, UI_URI
@@ -32,6 +32,129 @@ class ToolOutput(BaseModel):
     next_steps: list[dict[str, Any]]
     conflicts: list[dict[str, Any]] | None = None
     error: ToolError | None = None
+
+
+class _InputModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, strict=True)
+
+
+class BlueprintItemInput(_InputModel):
+    name: str
+    group: str | None = Field(default=None, validation_alias=AliasChoices("group", "group_name"))
+    quantity: int = 1
+    unit: str | None = None
+    note: str | None = None
+    packed: bool = False
+    not_needed: bool = False
+
+
+class ModuleItemInput(_InputModel):
+    item_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("item_key", "option_key", "key"),
+    )
+    name: str
+    group: str | None = Field(default=None, validation_alias=AliasChoices("group", "group_name"))
+    quantity: int = 1
+    unit: str | None = None
+    note: str | None = None
+
+
+class StableModuleItemInput(ModuleItemInput):
+    item_key: str = Field(validation_alias=AliasChoices("item_key", "option_key", "key"))
+
+
+class OptionInput(_InputModel):
+    option_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("option_key", "item_key", "key"),
+    )
+    name: str
+    group: str | None = Field(default=None, validation_alias=AliasChoices("group", "group_name"))
+    quantity: int = 1
+    unit: str | None = None
+    note: str | None = None
+
+
+class UpdateOptionInput(OptionInput):
+    option_key: str = Field(validation_alias=AliasChoices("option_key", "item_key", "key"))
+
+
+class VariantRemoveInput(_InputModel):
+    item_key: str = Field(validation_alias=AliasChoices("item_key", "key"))
+
+
+class ModuleVariantInput(_InputModel):
+    label: str
+    add: list[ModuleItemInput] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("add", "items"),
+    )
+    remove: list[str | VariantRemoveInput] = Field(default_factory=list)
+
+
+class StableModuleVariantInput(_InputModel):
+    label: str
+    add: list[StableModuleItemInput] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("add", "items"),
+    )
+    remove: list[str | VariantRemoveInput] = Field(default_factory=list)
+
+
+class _ModuleChoiceInput(_InputModel):
+    choice_key: str = Field(validation_alias=AliasChoices("choice_key", "key", "id"))
+    label: str | None = None
+    required: bool = True
+
+
+class ModuleChoiceInput(_ModuleChoiceInput):
+    options: list[OptionInput] = Field(min_length=1, max_length=50)
+
+
+class UpdateModuleChoiceInput(_ModuleChoiceInput):
+    options: list[UpdateOptionInput] = Field(min_length=1, max_length=50)
+
+
+class ModuleIncludeInput(_InputModel):
+    module_id: str = Field(validation_alias=AliasChoices("module_id", "id"))
+
+
+class ChoiceSelectionInput(_InputModel):
+    module_id: str | None = None
+    choice_key: str = Field(validation_alias=AliasChoices("choice_key", "choice_id"))
+    option_key: str
+
+
+ChoiceSelections = dict[str, str] | list[ChoiceSelectionInput]
+
+
+class ModuleSelectionInput(_InputModel):
+    module_id: str = Field(validation_alias=AliasChoices("module_id", "id"))
+    variant: str | None = None
+    choices: ChoiceSelections | None = Field(
+        default=None,
+        validation_alias=AliasChoices("choices", "choice_selections"),
+    )
+
+
+class JourneyContextInput(_InputModel):
+    destination: str | None = None
+    purpose: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    duration_days: int | None = None
+    season: str | None = None
+
+
+def _dump_models(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return value.model_dump(exclude_none=True)
+    if isinstance(value, list):
+        return [_dump_models(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _dump_models(item) for key, item in value.items()}
+    return value
 
 
 def _tool(mcp: FastMCP, *, app: AppConfig | None = None) -> Any:
@@ -68,22 +191,31 @@ def register_tools(mcp: FastMCP, service: ChecklistService) -> None:
     @_tool(mcp)
     def create_blueprint(
         name: str,
-        items: list[dict[str, Any]] | None = None,
-        module_selections: list[dict[str, Any] | str] | None = None,
+        items: list[BlueprintItemInput] | None = None,
+        module_selections: list[ModuleSelectionInput | str] | None = None,
     ) -> ToolResult:
         """Create a named reusable blueprint from zero or more items."""
-        return _result(lambda: service.create_blueprint(name, items, module_selections))
+        return _result(
+            lambda: service.create_blueprint(
+                name, _dump_models(items), _dump_models(module_selections)
+            )
+        )
 
     @_tool(mcp, app=app)
     def start_journey(
         name: str,
-        context: dict[str, Any] | None = None,
+        context: JourneyContextInput | None = None,
         blueprint_id: str | None = None,
-        module_selections: list[dict[str, Any] | str] | None = None,
+        module_selections: list[ModuleSelectionInput | str] | None = None,
     ) -> ToolResult:
         """Start an independent journey, optionally snapshotting a blueprint or modules."""
         return _result(
-            lambda: service.start_journey(name, context, blueprint_id, module_selections)
+            lambda: service.start_journey(
+                name,
+                _dump_models(context),
+                blueprint_id,
+                _dump_models(module_selections),
+            )
         )
 
     @_tool(mcp, app=app)
@@ -158,16 +290,21 @@ def register_tools(mcp: FastMCP, service: ChecklistService) -> None:
     @_tool(mcp)
     def create_module(
         name: str,
-        common_items: list[dict[str, Any]] | None = None,
-        variants: list[dict[str, Any]] | None = None,
-        includes: list[dict[str, Any] | str] | None = None,
-        choices: list[dict[str, Any]] | None = None,
+        common_items: list[ModuleItemInput] | None = None,
+        variants: list[ModuleVariantInput] | None = None,
+        includes: list[ModuleIncludeInput | str] | None = None,
+        choices: list[ModuleChoiceInput] | None = None,
         description: str | None = None,
     ) -> ToolResult:
         """Create a reusable module from stable items and explicit composition metadata."""
         return _result(
             lambda: service.create_module(
-                name, common_items, variants, includes, choices, description
+                name,
+                _dump_models(common_items),
+                _dump_models(variants),
+                _dump_models(includes),
+                _dump_models(choices),
+                description,
             )
         )
 
@@ -176,15 +313,21 @@ def register_tools(mcp: FastMCP, service: ChecklistService) -> None:
         module_id: str,
         name: str | None = None,
         description: str | None = None,
-        common_items: list[dict[str, Any]] | None = None,
-        variants: list[dict[str, Any]] | None = None,
-        includes: list[dict[str, Any] | str] | None = None,
-        choices: list[dict[str, Any]] | None = None,
+        common_items: list[StableModuleItemInput] | None = None,
+        variants: list[StableModuleVariantInput] | None = None,
+        includes: list[ModuleIncludeInput | str] | None = None,
+        choices: list[UpdateModuleChoiceInput] | None = None,
     ) -> ToolResult:
         """Update module definitions without rewriting existing materialized targets."""
         return _result(
             lambda: service.update_module(
-                module_id, name, description, common_items, variants, includes, choices
+                module_id,
+                name,
+                description,
+                _dump_models(common_items),
+                _dump_models(variants),
+                _dump_models(includes),
+                _dump_models(choices),
             )
         )
 
@@ -199,13 +342,18 @@ def register_tools(mcp: FastMCP, service: ChecklistService) -> None:
         target_id: str,
         module_id: str,
         variant: str | None = None,
-        choices: dict[str, str] | list[dict[str, Any]] | None = None,
+        choices: ChoiceSelections | None = None,
         selection_id: str | None = None,
     ) -> ToolResult:
         """Select and materialize one module into a journey or blueprint."""
         return _result(
             lambda: service.include_module(
-                target_type, target_id, module_id, variant, choices, selection_id
+                target_type,
+                target_id,
+                module_id,
+                variant,
+                _dump_models(choices),
+                selection_id,
             )
         )
 
