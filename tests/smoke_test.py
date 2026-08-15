@@ -44,6 +44,7 @@ def install_fastmcp_stubs() -> None:
     fastmcp.FastMCP = FakeMCP
     apps = types.ModuleType("fastmcp.apps")
     apps.AppConfig = lambda **kwargs: kwargs
+    apps.ResourceCSP = lambda **kwargs: kwargs
     tools = types.ModuleType("fastmcp.tools")
     tools.ToolResult = lambda **kwargs: kwargs
     mcp = types.ModuleType("mcp")
