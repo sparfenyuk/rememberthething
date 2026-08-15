@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
+from html.parser import HTMLParser
 from importlib import import_module
 
 import httpx
@@ -31,6 +33,74 @@ TOOL_NAMES = {
     "select_module_option",
     "refresh_composition",
 }
+
+
+class UIContractParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.input_ids: set[str] = set()
+        self.labels: dict[str, str] = {}
+        self.scripts: list[str] = []
+        self._label_for: str | None = None
+        self._label_text: list[str] = []
+        self._script: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if tag == "input" and attributes.get("id"):
+            self.input_ids.add(attributes["id"])
+        elif tag == "label":
+            self._label_for = attributes.get("for")
+            self._label_text = []
+        elif tag == "script":
+            self._script = []
+
+    def handle_data(self, data: str) -> None:
+        if self._label_for is not None:
+            self._label_text.append(data)
+        if self._script is not None:
+            self._script.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "label" and self._label_for is not None:
+            self.labels[self._label_for] = "".join(self._label_text).strip()
+            self._label_for = None
+        elif tag == "script" and self._script is not None:
+            self.scripts.append("".join(self._script))
+            self._script = None
+
+
+def execute_ui_script(script: str) -> list[dict[str, object]]:
+    harness = r"""
+const fs = require('node:fs');
+const source = fs.readFileSync(0, 'utf8');
+const posted = [];
+let receiveMessage;
+const elements = new Map();
+global.window = {
+  addEventListener(type, handler) { if (type === 'message') receiveMessage = handler; },
+  parent: {
+    postMessage(message) {
+      posted.push(message);
+      if (message.method === 'ui/initialize') {
+        queueMicrotask(() => receiveMessage({data: {id: message.id, result: {}}}));
+      }
+    },
+  },
+};
+global.document = {
+  getElementById(id) {
+    if (!elements.has(id)) elements.set(id, {addEventListener() {}});
+    return elements.get(id);
+  },
+};
+eval(source);
+setImmediate(() => process.stdout.write(JSON.stringify(posted)));
+"""
+    completed = subprocess.run(
+        ["node", "-e", harness], input=script, text=True, capture_output=True, check=True
+    )
+    return json.loads(completed.stdout)
 
 
 @pytest.mark.asyncio
@@ -445,14 +515,32 @@ def test_ui_contract_is_registered():
             }
         }
     }
+    parser = UIContractParser()
+    parser.feed(result.contents[0].content)
+    assert parser.labels["new-item"] == "Item name"
+    assert "new-item" in parser.input_ids
+    assert execute_ui_script(parser.scripts[0]) == [
+        {
+            "jsonrpc": "2.0",
+            "id": "journey-1",
+            "method": "ui/initialize",
+            "params": {
+                "protocolVersion": "2026-01-26",
+                "appInfo": {"name": "journey-checklist", "version": "0.1.0"},
+                "appCapabilities": {"availableDisplayModes": ["inline"]},
+            },
+        },
+        {
+            "jsonrpc": "2.0",
+            "method": "ui/notifications/initialized",
+            "params": {},
+        },
+    ]
 
 
 def test_ui_contract_uses_mcp_app_lifecycle_and_tool_notifications():
     ui = import_module("src.journey_checklist.ui")
     assert "sendRequest('ui/initialize'" in ui.CHECKLIST_HTML
-    assert "appInfo:{name:'journey-checklist', version:'0.1.0'}" in ui.CHECKLIST_HTML
-    assert "clientInfo:" not in ui.CHECKLIST_HTML
-    assert ".sr-only { position:absolute;" in ui.CHECKLIST_HTML
     assert "ui/notifications/initialized" in ui.CHECKLIST_HTML
     assert "ui/notifications/tool-result" in ui.CHECKLIST_HTML
     assert "message?.params" in ui.CHECKLIST_HTML
