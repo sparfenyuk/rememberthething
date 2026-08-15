@@ -29,6 +29,7 @@ CHECKLIST_HTML = r"""<!doctype html>
     .actions { display:flex; flex-wrap:wrap; gap:8px; } .empty { color:var(--muted); padding:8px 0; }
     form { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; } input { min-width:0; border:1px solid var(--line); border-radius:10px; padding:10px 11px; background:#fff; color:var(--ink); font:inherit; } input:focus { outline:3px solid #0b776e33; border-color:var(--teal); }
     .hint { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:10px 0; border-top:1px solid var(--line); } .hint:first-of-type { border-top:0; } .hint p { color:var(--muted); font-size:13px; } .error { color:var(--red); background:#fff0ed; border-color:#efc2bb; }
+    .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
     @media (max-width:460px) { main { padding:20px 12px 36px; } header { display:block; } .summary { margin-top:14px; text-align:left; } .item { grid-template-columns:auto minmax(0,1fr); } .item .actions { grid-column:2; } }
   </style>
 </head>
@@ -115,7 +116,7 @@ CHECKLIST_HTML = r"""<!doctype html>
   }
   function renderHints(hints) { const section = $('hints-section'); if (!hints.length) { section.hidden = true; return; } section.hidden = false; $('hints').innerHTML = hints.map((hint, index) => `<div class="hint"><p>${escapeHtml(hint.reason)}${hint.needs.length ? `<br>Needs: ${escapeHtml(hint.needs.join(', '))}` : ''}</p><button data-hint="${index}">Open</button></div>`).join(''); $('hints').querySelectorAll('[data-hint]').forEach((button) => button.addEventListener('click', () => activateHint(hints[button.dataset.hint]))); }
   async function activateHint(hint) { const args = {...hint.arguments}; for (const need of hint.needs || []) { if (need === 'blueprint_id or new_blueprint_name') { const blueprintId = prompt('Existing blueprint ID (blank to create a new one)'); if (blueprintId) args.blueprint_id = blueprintId; else { const name = prompt('New blueprint name'); if (!name) return; args.new_blueprint_name = name; } continue; } const value = prompt(`Provide ${need}`); if (!value) return; args[need] = need === 'duration_days' ? Number(value) : value; } if (hint.requires_confirmation && !confirm(hint.reason)) return; mutate(hint.tool, args); }
-  async function initialize() { try { await sendRequest('ui/initialize', {protocolVersion:'2026-01-26', clientInfo:{name:'journey-checklist', version:'0.1.0'}, appCapabilities:{availableDisplayModes:['inline']}}); sendNotification('ui/notifications/initialized'); } catch (error) { showError(error.message || 'Unable to connect to the MCP host.'); } }
+  async function initialize() { try { await sendRequest('ui/initialize', {protocolVersion:'2026-01-26', appInfo:{name:'journey-checklist', version:'0.1.0'}, appCapabilities:{availableDisplayModes:['inline']}}); sendNotification('ui/notifications/initialized'); } catch (error) { showError(error.message || 'Unable to connect to the MCP host.'); } }
   initialize();
 </script>
 </body>

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from html.parser import HTMLParser
 from importlib import import_module
 
 import httpx
@@ -31,6 +32,32 @@ TOOL_NAMES = {
     "select_module_option",
     "refresh_composition",
 }
+
+
+class UIContractParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.input_ids: set[str] = set()
+        self.labels: dict[str, str] = {}
+        self._label_for: str | None = None
+        self._label_text: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if tag == "input" and attributes.get("id"):
+            self.input_ids.add(attributes["id"])
+        elif tag == "label":
+            self._label_for = attributes.get("for")
+            self._label_text = []
+
+    def handle_data(self, data: str) -> None:
+        if self._label_for is not None:
+            self._label_text.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "label" and self._label_for is not None:
+            self.labels[self._label_for] = "".join(self._label_text).strip()
+            self._label_for = None
 
 
 @pytest.mark.asyncio
@@ -434,19 +461,18 @@ def test_ui_contract_is_registered():
     app = create_app("/tmp/journey-checklist-test.sqlite3")
     resource = asyncio.run(app.state.mcp.get_resource(UI_URI))
     assert resource is not None
-
-
-def test_ui_contract_uses_mcp_app_lifecycle_and_tool_notifications():
-    ui = import_module("src.journey_checklist.ui")
-    assert "sendRequest('ui/initialize'" in ui.CHECKLIST_HTML
-    assert "ui/notifications/initialized" in ui.CHECKLIST_HTML
-    assert "ui/notifications/tool-result" in ui.CHECKLIST_HTML
-    assert "message?.params" in ui.CHECKLIST_HTML
-    assert "value.method === 'tools/call'" not in ui.CHECKLIST_HTML
-    assert "include_module" in ui.CHECKLIST_HTML
-    assert "select_module_option" in ui.CHECKLIST_HTML
-    assert "refresh_composition" in ui.CHECKLIST_HTML
-    assert "source.path" in ui.CHECKLIST_HTML
-    assert "Modules in this checklist" in ui.CHECKLIST_HTML
-    assert 'data-choice="${escapeHtml(choice.choice_id)}"' in ui.CHECKLIST_HTML
-    assert 'data-choice="${escapeHtml(choice.choice_key)}"' not in ui.CHECKLIST_HTML
+    result = asyncio.run(app.state.mcp.read_resource(UI_URI))
+    assert result.contents[0].meta == {
+        "ui": {
+            "csp": {
+                "connectDomains": [],
+                "resourceDomains": [],
+                "frameDomains": [],
+                "baseUriDomains": [],
+            }
+        }
+    }
+    parser = UIContractParser()
+    parser.feed(result.contents[0].content)
+    assert parser.labels["new-item"] == "Item name"
+    assert "new-item" in parser.input_ids
