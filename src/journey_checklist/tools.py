@@ -5,7 +5,7 @@ from collections.abc import Callable
 from typing import Any
 
 from fastmcp import FastMCP
-from fastmcp.apps import AppConfig
+from fastmcp.apps import AppConfig, ResourceCSP
 from fastmcp.tools import ToolResult
 from mcp.types import TextContent
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
@@ -171,7 +171,18 @@ def _result(operation: Callable[[], dict[str, Any]]) -> ToolResult:
 
 
 def register_tools(mcp: FastMCP, service: ChecklistService) -> None:
-    @mcp.resource(UI_URI, mime_type="text/html;profile=mcp-app")
+    @mcp.resource(
+        UI_URI,
+        mime_type="text/html;profile=mcp-app",
+        app=AppConfig(
+            csp=ResourceCSP(
+                connect_domains=[],
+                resource_domains=[],
+                frame_domains=[],
+                base_uri_domains=[],
+            )
+        ),
+    )
     def journey_checklist_ui() -> str:
         """The rendered journey checklist MCP App."""
         return CHECKLIST_HTML
