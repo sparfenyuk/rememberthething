@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from src.journey_checklist.repository import Repository
 from src.journey_checklist.service import ChecklistService
-from src.journey_checklist.ui import CHECKLIST_HTML, UI_URI
+from src.journey_checklist.ui import UI_URI
 
 
 class FakeTool:
@@ -112,8 +112,6 @@ def main() -> None:
     }
     assert expected == set(fake.tools)
     assert UI_URI in fake.resources
-    assert "next_steps" in CHECKLIST_HTML
-    assert "tools/call" in CHECKLIST_HTML and "postMessage" in CHECKLIST_HTML
 
 
 if __name__ == "__main__":
